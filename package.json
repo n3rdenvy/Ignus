@@ -1,0 +1,35 @@
+{
+  "name": "ignus",
+  "version": "1.0.0",
+  "description": "Local AI launcher for InvokeAI and ComfyUI",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "package": "electron-vite build && electron-builder"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "vite": "^5.4.11"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "build": {
+    "appId": "com.ignus.app",
+    "productName": "Ignus",
+    "icon": "build/icon.icns",
+    "asar": true,
+    "files": ["out/**/*", "node_modules/**/*", "!node_modules/.cache/**/*"],
+    "directories": { "output": "release" },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": { "target": "dmg", "arch": ["arm64"] },
+      "identity": null
+    }
+  }
+}

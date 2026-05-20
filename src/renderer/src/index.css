@@ -1,0 +1,25 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Flame alive loop — organic flicker and sway */
+@keyframes flame_live {
+  0%   { transform: scale(1)     translateY(0px)  translateX(0px);  filter: brightness(1)    saturate(1);    }
+  15%  { transform: scale(1.012) translateY(-3px) translateX(1px);  filter: brightness(1.06) saturate(1.08); }
+  30%  { transform: scale(1.008) translateY(-1px) translateX(-2px); filter: brightness(0.97) saturate(0.95); }
+  45%  { transform: scale(1.018) translateY(-4px) translateX(1px);  filter: brightness(1.1)  saturate(1.12); }
+  60%  { transform: scale(1.005) translateY(-2px) translateX(-1px); filter: brightness(1.02) saturate(1.04); }
+  75%  { transform: scale(1.014) translateY(-3px) translateX(2px);  filter: brightness(1.07) saturate(1.1);  }
+  90%  { transform: scale(1.006) translateY(-1px) translateX(0px);  filter: brightness(0.98) saturate(0.97); }
+  100% { transform: scale(1)     translateY(0px)  translateX(0px);  filter: brightness(1)    saturate(1);    }
+}
+
+.flame_live { animation: flame_live 3.2s ease-in-out infinite; }
