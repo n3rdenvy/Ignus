@@ -1,23 +1,26 @@
-import { app, BrowserWindow, ipcMain, nativeImage, screen, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeImage, screen, shell, Tray, Menu } from 'electron'
+import os from 'os'
 import { join } from 'path'
 import { spawn } from 'child_process'
 import { createConnection } from 'net'
 import { writeFileSync } from 'fs'
 import { homedir } from 'os'
 
+const HOME = homedir()
+
 const SERVICES = {
   InvokeAI: {
     port: 9090,
-    cmd:  '/Users/gay_villain/invokeai/venv/bin/invokeai-web',
+    cmd:  `${HOME}/invokeai/venv/bin/invokeai-web`,
     args: [],
-    cwd:  '/Users/gay_villain/invokeai',
+    cwd:  `${HOME}/invokeai`,
     url:  'http://localhost:9090',
   },
   ComfyUI: {
     port: 8188,
-    cmd:  '/Users/gay_villain/ComfyUI/venv/bin/python3',
-    args: ['/Users/gay_villain/ComfyUI/main.py'],
-    cwd:  '/Users/gay_villain/ComfyUI',
+    cmd:  `${HOME}/ComfyUI/venv/bin/python3`,
+    args: [`${HOME}/ComfyUI/main.py`],
+    cwd:  `${HOME}/ComfyUI`,
     url:  'http://localhost:8188',
   },
 }
@@ -27,8 +30,14 @@ const WATCHDOG_FILE  = join(homedir(), '.ignus_last_launch')
 const WATCHDOG_SCRIPT = join(homedir(), '.ignus_watchdog.sh')
 const WATCHDOG_PLIST = join(homedir(), 'Library/LaunchAgents/com.ignus.watchdog.plist')
 
-let picker_win = null
-let idle_timer = null
+let picker_win    = null
+let idle_timer    = null
+let tray          = null
+let tray_frames   = []
+let frame_idx     = 0
+let anim_interval = null
+let current_load  = 0
+let cpu_snapshot  = null
 
 function is_port_open(port) {
   return new Promise(resolve => {
@@ -40,18 +49,29 @@ function is_port_open(port) {
 }
 
 function start_service(name) {
+  if (name === 'InvokeAI') {
+    // InvokeAI is managed by launchd (com.eris.invokeai) — kickstart instead of nohup
+    spawn('launchctl', ['kickstart', '-k', `gui/${process.getuid()}/com.eris.invokeai`], {
+      stdio: 'ignore',
+    }).unref()
+    return
+  }
   const svc = SERVICES[name]
-  // nohup + background shell: child is reparented to launchd, survives Ignus quit
   const cmd = `nohup ${[svc.cmd, ...svc.args].join(' ')} > /dev/null 2>&1 &`
   spawn('sh', ['-c', cmd], {
     cwd:      svc.cwd,
     detached: true,
     stdio:    'ignore',
-    env:      { ...process.env, HOME: '/Users/gay_villain' },
+    env:      { ...process.env, HOME },
   }).unref()
 }
 
 function stop_service(name) {
+  if (name === 'InvokeAI') {
+    // Stop via launchd — KeepAlive will restart after ThrottleInterval if needed
+    spawn('launchctl', ['stop', 'com.eris.invokeai'], { stdio: 'ignore' }).unref()
+    return
+  }
   const svc = SERVICES[name]
   spawn('pkill', ['-f', svc.cmd], { stdio: 'ignore' }).unref()
 }
@@ -109,6 +129,78 @@ function reset_idle_timer() {
     }
   }, IDLE_MS)
 }
+
+// ── CPU load ────────────────────────────────────────────────────────────────
+
+function snapshot_cpu() {
+  return os.cpus().map(c => ({ ...c.times }))
+}
+
+function calc_load(s1, s2) {
+  let idle = 0, total = 0
+  s1.forEach((c, i) => {
+    Object.keys(c).forEach(k => {
+      const d = s2[i][k] - c[k]
+      total += d
+      if (k === 'idle') idle += d
+    })
+  })
+  return total === 0 ? 0 : Math.min(1, Math.max(0, 1 - idle / total))
+}
+
+function start_cpu_polling() {
+  cpu_snapshot = snapshot_cpu()
+  setInterval(() => {
+    const next = snapshot_cpu()
+    current_load = calc_load(cpu_snapshot, next)
+    cpu_snapshot = next
+    restart_tray_animation()
+  }, 2000)
+}
+
+// ── Tray animation ───────────────────────────────────────────────────────────
+
+function restart_tray_animation() {
+  if (!tray || tray_frames.length === 0) return
+  clearInterval(anim_interval)
+
+  // 200ms at idle → 45ms at full load
+  const interval_ms = Math.round(200 - current_load * 155)
+
+  anim_interval = setInterval(() => {
+    frame_idx = (frame_idx + 1) % tray_frames.length
+    tray.setImage(tray_frames[frame_idx])
+  }, interval_ms)
+}
+
+function init_tray(frames) {
+  tray_frames = frames
+
+  // Fallback single-frame image if frames aren't ready yet
+  const placeholder = nativeImage.createEmpty()
+  tray = new Tray(placeholder)
+  tray.setToolTip('Ignus')
+  tray.on('click', () => create_picker())
+
+  if (frames.length > 0) {
+    tray.setImage(frames[0])
+    restart_tray_animation()
+  }
+}
+
+// ── Tray frames (sent from renderer canvas) ──────────────────────────────────
+
+ipcMain.on('tray-frames', (_e, data_urls) => {
+  const frames = data_urls.map(url => nativeImage.createFromDataURL(url))
+  if (!tray) {
+    init_tray(frames)
+  } else {
+    tray_frames = frames
+    restart_tray_animation()
+  }
+})
+
+// ── Picker ───────────────────────────────────────────────────────────────────
 
 function create_picker() {
   if (picker_win && !picker_win.isDestroyed()) {
@@ -191,10 +283,11 @@ if (!got_lock) {
 
   app.whenReady().then(() => {
     if (process.platform === 'darwin') {
-      const dock_icon = nativeImage.createFromPath(join(__dirname, '../../build/icon.png'))
-      app.dock.setIcon(dock_icon)
+      app.setActivationPolicy('accessory') // menu bar only — no dock, no Cmd+Tab
     }
     install_watchdog()
+    start_cpu_polling()
+    init_tray([])      // tray exists immediately; frames arrive from renderer
     create_picker()
   })
 
