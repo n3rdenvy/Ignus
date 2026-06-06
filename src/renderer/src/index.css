@@ -23,3 +23,12 @@ html, body, #root {
 }
 
 .flame_live { animation: flame_live 3.2s ease-in-out infinite; }
+
+/* Mesh scanline build — reveals top-to-bottom like a CRT drawing the frame */
+@keyframes mesh_scanline {
+  0%   { clip-path: inset(0 0 100% 0); filter: brightness(1.4); }
+  60%  { clip-path: inset(0 0 12%  0); filter: brightness(1.1); }
+  100% { clip-path: inset(0 0 0%   0); filter: brightness(1);   }
+}
+
+.mesh_build { animation: mesh_scanline 2.6s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }

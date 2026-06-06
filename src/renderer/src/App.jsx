@@ -1,16 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react'
 import MESH from './assets/white_mesh.png'
-import FLAME from './assets/full_flame.png'
+
+if (!window.api) {
+  const noop = () => {}
+  window.api = {
+    get_status: async () => ({ InvokeAI: false, ComfyUI: false }),
+    send_tray_frames: noop,
+    launch: async () => ({ ok: true }),
+    stop_service: async () => {},
+    open_url: noop,
+    close: noop,
+  }
+}
 
 const SERVICES = [
-  { name: 'InvokeAI', label: 'InvokeAI', port: 9090, color: '#f97316' },
-  { name: 'ComfyUI',  label: 'ComfyUI',  port: 8188, color: '#a78bfa' },
+  { name: 'InvokeAI', label: 'InvokeAI', port: 9090, color: '#f97316', url: 'http://localhost:9090' },
+  { name: 'ComfyUI',  label: 'ComfyUI',  port: 8188, color: '#a78bfa', url: 'http://localhost:8188' },
 ]
 
-const TO_FLAME_MS = 6000
-const LIVE_MS     = 3200
-const TO_MESH_MS  = 6000
-const PAUSE_MS    = 800
+const POLL_MS = 3000
 
 function wait(ms) { return new Promise(r => setTimeout(r, ms)) }
 
@@ -19,48 +27,76 @@ export default function App() {
   const [selected,  set_selected]  = useState({})
   const [loading,   set_loading]   = useState(true)
   const [launching, set_launching] = useState(false)
+  const [launch_elapsed, set_elapsed] = useState(0)
   const [error,     set_error]     = useState(null)
 
-  const [phase, set_phase] = useState('mesh')
-  const loop_ref = useRef(true)
+  const elapsed_ref = useRef(null)
 
   function refresh_status() {
     window.api.get_status().then(set_status)
   }
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    function on_key(e) {
+      if (e.key === 'Escape') window.api.close()
+      if ((e.key === 'Enter' || e.key === ' ') && !launching) launch()
+    }
+    window.addEventListener('keydown', on_key)
+    return () => window.removeEventListener('keydown', on_key)
+  }, [launching, selected])
+
+  // Tray icon frames
+  useEffect(() => {
+    const frames = []
+    for (let i = 0; i < 8; i++) {
+      const canvas  = document.createElement('canvas')
+      canvas.width  = 44
+      canvas.height = 44
+      const ctx = canvas.getContext('2d')
+      const t       = (i / 8) * Math.PI * 2
+      const sway    = Math.sin(t) * 4.5
+      const flicker = Math.sin(t * 1.7 + 0.8) * 2
+      const cx     = 22
+      const tip_x  = cx + sway
+      const tip_y  = 7 + flicker
+      const base_y = 40
+      const grad = ctx.createRadialGradient(cx, base_y - 10, 1, cx, base_y - 12, 22)
+      grad.addColorStop(0,    'rgba(255,243,180,0.98)')
+      grad.addColorStop(0.28, 'rgba(249,115,22,0.94)')
+      grad.addColorStop(0.62, 'rgba(220,38,38,0.88)')
+      grad.addColorStop(1,    'rgba(120,10,10,0)')
+      ctx.beginPath()
+      ctx.moveTo(tip_x, tip_y)
+      ctx.bezierCurveTo(tip_x + 6, tip_y + 9, cx + 16 + sway * 0.4, base_y - 16, cx + 13, base_y)
+      ctx.bezierCurveTo(cx + 6,  base_y + 2, cx - 6,  base_y + 2, cx - 13, base_y)
+      ctx.bezierCurveTo(cx - 16 - sway * 0.4, base_y - 16, tip_x - 6, tip_y + 9, tip_x, tip_y)
+      ctx.fillStyle = grad
+      ctx.fill()
+      const wisp_x = cx + Math.sin(t + 1.2) * 3.5
+      const wisp_y = base_y - 15 + Math.cos(t * 1.3) * 2.5
+      const wg = ctx.createRadialGradient(wisp_x, wisp_y, 0, wisp_x, wisp_y, 6)
+      wg.addColorStop(0, 'rgba(255,255,210,0.85)')
+      wg.addColorStop(1, 'rgba(249,115,22,0)')
+      ctx.beginPath()
+      ctx.arc(wisp_x, wisp_y, 6, 0, Math.PI * 2)
+      ctx.fillStyle = wg
+      ctx.fill()
+      frames.push(canvas.toDataURL('image/png'))
+    }
+    window.api.send_tray_frames(frames)
+  }, [])
+
   useEffect(() => {
     window.api.get_status().then(s => {
       set_status(s)
       const pre = {}
-      for (const [name, running] of Object.entries(s)) pre[name] = !running
+      for (const [name] of Object.entries(s)) pre[name] = false
       set_selected(pre)
       set_loading(false)
     })
-
-    // poll status every 10s
-    const poll = setInterval(refresh_status, 10000)
-
-    async function run_loop() {
-      while (loop_ref.current) {
-        set_phase('to_flame')
-        await wait(TO_FLAME_MS)
-        if (!loop_ref.current) break
-
-        set_phase('flame_live')
-        await wait(LIVE_MS)
-        if (!loop_ref.current) break
-
-        set_phase('to_mesh')
-        await wait(TO_MESH_MS)
-        if (!loop_ref.current) break
-
-        set_phase('mesh')
-        await wait(PAUSE_MS)
-      }
-    }
-
-    const t = setTimeout(run_loop, 600)
-    return () => { loop_ref.current = false; clearTimeout(t); clearInterval(poll) }
+    const poll = setInterval(refresh_status, POLL_MS)
+    return () => clearInterval(poll)
   }, [])
 
   function toggle(name) {
@@ -69,8 +105,11 @@ export default function App() {
 
   async function stop(name) {
     await window.api.stop_service(name)
-    // give pkill a moment then refresh
     setTimeout(refresh_status, 800)
+  }
+
+  function open_in_browser(url) {
+    window.api.open_url(url)
   }
 
   async function launch() {
@@ -78,53 +117,40 @@ export default function App() {
     if (!names.length) { window.api.close(); return }
     set_launching(true)
     set_error(null)
+    set_elapsed(0)
+    elapsed_ref.current = setInterval(() => set_elapsed(s => s + 1), 1000)
     const result = await window.api.launch(names)
+    clearInterval(elapsed_ref.current)
     set_launching(false)
-    if (result && !result.ok) {
-      set_error(`Failed to start: ${result.failed.join(', ')}`)
-    }
+    set_elapsed(0)
+    if (result && !result.ok) set_error(`Failed to start: ${result.failed.join(', ')}`)
   }
 
   const any_selected = Object.values(selected).some(Boolean)
 
-  const mesh_opacity  = (phase === 'to_flame' || phase === 'flame_live') ? 0 : 1
-  const flame_opacity = (phase === 'mesh' || phase === 'to_mesh') ? 0 : 1
-  const xfade = (phase === 'to_flame' || phase === 'to_mesh') ? '6s' : '0.1s'
-
-  const bg_shared = {
-    position: 'absolute', inset: 0,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-    width: '100%', height: '100%',
-    willChange: 'opacity, transform',
+  function boot_label() {
+    if (launch_elapsed < 5)  return 'starting up…'
+    if (launch_elapsed < 15) return `booting… ${launch_elapsed}s`
+    if (launch_elapsed < 40) return `loading models… ${launch_elapsed}s`
+    return `almost there… ${launch_elapsed}s`
   }
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', borderRadius: 16, background: '#000' }}>
 
-      {/* Mesh layer */}
-      <div style={{
-        ...bg_shared,
-        backgroundImage: `url(${MESH})`,
-        opacity: mesh_opacity,
-        transition: `opacity ${xfade} ease-in-out`,
-      }} />
+      {/* Video background */}
+      <video
+        autoPlay loop muted playsInline
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+      >
+        <source src="/flame_anim.webm" type="video/webm" />
+        <source src="/flame_anim.mp4"  type="video/mp4" />
+      </video>
 
-      {/* Flame layer */}
-      <div
-        className={phase === 'flame_live' ? 'flame_live' : undefined}
-        style={{
-          ...bg_shared,
-          backgroundImage: `url(${FLAME})`,
-          opacity: flame_opacity,
-          transition: `opacity ${xfade} ease-in-out`,
-        }}
-      />
-
-      {/* Dark overlay */}
+      {/* Dark overlay — keeps UI readable over the video */}
       <div style={{
         position: 'absolute', inset: 0,
-        background: 'linear-gradient(160deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0.58) 55%, rgba(8,3,0,0.74) 100%)',
+        background: 'linear-gradient(160deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.48) 55%, rgba(8,3,0,0.72) 100%)',
       }} />
 
       {/* Content */}
@@ -134,9 +160,12 @@ export default function App() {
         display: 'flex', flexDirection: 'column',
         padding: '18px 18px 16px', gap: 10,
         WebkitAppRegion: 'drag',
+        backdropFilter: 'blur(28px) saturate(1.5)',
+        WebkitBackdropFilter: 'blur(28px) saturate(1.5)',
+        background: 'linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.05)',
       }}>
 
-        {/* Close — must live inside the drag container so no-drag override takes effect */}
         <button onClick={() => window.api.close()} style={{
           position: 'absolute', top: 12, right: 14,
           background: 'none', border: 'none', cursor: 'pointer',
@@ -145,26 +174,29 @@ export default function App() {
         }}>×</button>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 20 }}>🔥</span>
+          <img src={MESH} style={{ width: 20, height: 20, objectFit: 'contain', opacity: 0.9 }} alt="" />
           <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.3px' }}>Ignus</span>
-          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 1 }}>local AI launcher</span>
+          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 1 }}>local AI, one click</span>
         </div>
 
         <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', flexShrink: 0 }} />
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, WebkitAppRegion: 'no-drag' }}>
           {loading ? (
-            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13, textAlign: 'center', paddingTop: 24 }}>checking services...</div>
+            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13, textAlign: 'center', paddingTop: 24 }}>checking services…</div>
           ) : SERVICES.map(svc => {
             const running = status[svc.name]
             const checked = selected[svc.name] ?? false
             return (
-              <div key={svc.name} onClick={() => toggle(svc.name)} style={{
+              <div key={svc.name} onClick={() => !running && toggle(svc.name)} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '10px 12px', borderRadius: 10,
-                background: checked ? 'rgba(255,255,255,0.09)' : 'rgba(0,0,0,0.3)',
-                border: `1px solid ${checked ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.06)'}`,
-                cursor: 'pointer', backdropFilter: 'blur(6px)',
+                background: checked ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.22)',
+                border: `1px solid ${checked ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)'}`,
+                cursor: running ? 'default' : 'pointer',
+                backdropFilter: 'blur(16px) saturate(1.3)',
+                WebkitBackdropFilter: 'blur(16px) saturate(1.3)',
+                boxShadow: checked ? 'inset 0 1px 0 rgba(255,255,255,0.1)' : 'none',
                 transition: 'background 0.15s, border-color 0.15s',
               }}>
                 <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: running ? '#4ade80' : '#3f3f46', boxShadow: running ? '0 0 6px #4ade8099' : 'none' }} />
@@ -172,6 +204,14 @@ export default function App() {
                 <span style={{ color: 'rgba(255,255,255,0.22)', fontSize: 10, background: 'rgba(0,0,0,0.3)', padding: '2px 5px', borderRadius: 4 }}>:{svc.port}</span>
                 {running && (
                   <>
+                    <button
+                      onClick={e => { e.stopPropagation(); open_in_browser(svc.url) }}
+                      style={{
+                        background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                        color: 'rgba(255,255,255,0.6)', fontSize: 9, padding: '2px 6px', borderRadius: 4,
+                        cursor: 'pointer', lineHeight: 1.4, flexShrink: 0,
+                      }}
+                    >open</button>
                     <span style={{ color: '#4ade80', fontSize: 10, background: 'rgba(74,222,128,0.12)', padding: '2px 6px', borderRadius: 4 }}>running</span>
                     <button
                       onClick={e => { e.stopPropagation(); stop(svc.name) }}
@@ -183,15 +223,17 @@ export default function App() {
                     >stop</button>
                   </>
                 )}
-                <div style={{
-                  width: 17, height: 17, borderRadius: 5, flexShrink: 0,
-                  border: `1.5px solid ${checked ? svc.color : 'rgba(255,255,255,0.2)'}`,
-                  background: checked ? svc.color : 'rgba(0,0,0,0.3)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  transition: 'background 0.15s, border-color 0.15s',
-                }}>
-                  {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="#000" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                </div>
+                {!running && (
+                  <div style={{
+                    width: 17, height: 17, borderRadius: 5, flexShrink: 0,
+                    border: `1.5px solid ${checked ? svc.color : 'rgba(255,255,255,0.2)'}`,
+                    background: checked ? svc.color : 'rgba(0,0,0,0.3)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    transition: 'background 0.15s, border-color 0.15s',
+                  }}>
+                    {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="#000" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                  </div>
+                )}
               </div>
             )
           })}
@@ -205,15 +247,16 @@ export default function App() {
 
         <button onClick={launch} disabled={launching} style={{
           width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', flexShrink: 0,
-          background: any_selected ? 'linear-gradient(135deg, #f97316, #dc2626)' : 'rgba(255,255,255,0.07)',
+          background: any_selected && !launching ? 'linear-gradient(135deg, #f97316, #dc2626)' : 'rgba(255,255,255,0.07)',
           color: any_selected ? '#fff' : 'rgba(255,255,255,0.25)',
           fontSize: 13, fontWeight: 600,
           cursor: any_selected && !launching ? 'pointer' : 'default',
           letterSpacing: '-0.2px', transition: 'background 0.15s, color 0.15s',
           WebkitAppRegion: 'no-drag',
         }}>
-          {launching ? 'launching...' : any_selected ? 'Launch' : 'nothing selected'}
+          {launching ? boot_label() : any_selected ? 'Launch' : 'nothing selected'}
         </button>
+
       </div>
     </div>
   )

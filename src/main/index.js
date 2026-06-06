@@ -273,6 +273,8 @@ ipcMain.handle('stop_service', (_e, name) => {
   stop_service(name)
 })
 
+ipcMain.handle('open_url', (_e, url) => shell.openExternal(url))
+
 ipcMain.on('close', () => picker_win?.hide())
 
 const got_lock = app.requestSingleInstanceLock()
