@@ -105,7 +105,13 @@ export default function App() {
 
   async function stop(name) {
     await window.api.stop_service(name)
-    setTimeout(refresh_status, 800)
+    // Poll until the service is actually down (up to 8s)
+    let attempts = 0
+    const poll = setInterval(async () => {
+      await refresh_status()
+      attempts++
+      if (attempts >= 8) clearInterval(poll)
+    }, 1000)
   }
 
   function open_in_browser(url) {
@@ -143,8 +149,8 @@ export default function App() {
         autoPlay loop muted playsInline
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
       >
-        <source src="/flame_anim.webm" type="video/webm" />
-        <source src="/flame_anim.mp4"  type="video/mp4" />
+        <source src="./flame_anim.webm" type="video/webm" />
+        <source src="./flame_anim.mp4"  type="video/mp4" />
       </video>
 
       {/* Dark overlay — keeps UI readable over the video */}

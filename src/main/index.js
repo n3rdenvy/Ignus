@@ -68,12 +68,12 @@ function start_service(name) {
 
 function stop_service(name) {
   if (name === 'InvokeAI') {
-    // Stop via launchd — KeepAlive will restart after ThrottleInterval if needed
     spawn('launchctl', ['stop', 'com.eris.invokeai'], { stdio: 'ignore' }).unref()
     return
   }
   const svc = SERVICES[name]
-  spawn('pkill', ['-f', svc.cmd], { stdio: 'ignore' }).unref()
+  // Kill by full command line match; also try matching just the script path
+  spawn('pkill', ['-f', svc.args[0] || svc.cmd], { stdio: 'ignore' }).unref()
 }
 
 async function wait_for_port(port, timeout_ms = 90000) {
@@ -275,7 +275,7 @@ ipcMain.handle('stop_service', (_e, name) => {
 
 ipcMain.handle('open_url', (_e, url) => shell.openExternal(url))
 
-ipcMain.on('close', () => picker_win?.hide())
+ipcMain.on('close', () => app.quit())
 
 const got_lock = app.requestSingleInstanceLock()
 if (!got_lock) {

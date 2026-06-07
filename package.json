@@ -24,6 +24,7 @@
     "productName": "Ignus",
     "icon": "build/icon.icns",
     "asar": true,
+    "asarUnpack": ["out/renderer/**/*.mp4", "out/renderer/**/*.webm"],
     "files": ["out/**/*", "node_modules/**/*", "!node_modules/.cache/**/*"],
     "directories": { "output": "release" },
     "mac": {
