@@ -195,8 +195,8 @@ function restart_tray_animation() {
   if (!tray || tray_frames.length === 0) return
   clearInterval(anim_interval)
 
-  // 200ms at idle → 45ms at full load
-  const interval_ms = Math.round(200 - current_load * 155)
+  // Smooth real-fire playback: ~17fps idle → ~25fps under load (was 5fps idle = laggy)
+  const interval_ms = Math.round(58 - current_load * 18)
 
   anim_interval = setInterval(() => {
     frame_idx = (frame_idx + 1) % tray_frames.length

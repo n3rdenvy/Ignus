@@ -26,6 +26,9 @@
   --launch:      #F7A828;            /* warm — launch action */
   --close:       #F0622C;            /* warm orange-red — close action */
   --good:        #4ade80;
+  --gen:         #33E0A1;            /* Generate CTA — emerald that accents the blue */
+  --gen-soft:    rgba(51, 224, 161, 0.16);
+  --gen-line:    rgba(51, 224, 161, 0.5);
   --bad:         #f6685e;
   --cold:        #5E6B7E;            /* offline / idle */
   --flame-opacity: 0.42;

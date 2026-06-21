@@ -6,6 +6,7 @@ const C = {
   panel: 'var(--panel)', panelDim: 'var(--panel-dim)', line: 'var(--line)', lineStrong: 'var(--line-strong)',
   accent: 'var(--accent)', bright: 'var(--accent-bright)', soft: 'var(--accent-soft)', accentLine: 'var(--accent-line)',
   silver: 'var(--silver)', text: 'var(--text)', text2: 'var(--text-2)', dim: 'var(--text-dim)', faint: 'var(--text-faint)', live: 'var(--live)', good: 'var(--good)', bad: 'var(--bad)', cold: 'var(--cold)', bg: 'var(--bg-solid)',
+  gen: 'var(--gen)', genSoft: 'var(--gen-soft)', genLine: 'var(--gen-line)',
 }
 const DISPLAY = "'Satoshi', system-ui, sans-serif"
 const CODE = "'Satoshi', system-ui, sans-serif"  // swap to the CLI font later
@@ -269,15 +270,15 @@ export default function GenerationPanel({ comfyRunning }) {
       )}
 
       {/* Generate, with the image-count dropdown built into its left edge */}
-      <div style={{ ...glass, display: 'flex', alignItems: 'stretch', marginTop: 10, borderRadius: 9, border: `1px solid ${C.accentLine}`, background: busy ? C.panel : C.soft, overflow: 'visible' }}>
+      <div style={{ ...glass, display: 'flex', alignItems: 'stretch', marginTop: 10, borderRadius: 9, border: `1px solid ${C.genLine}`, background: C.panelDim, overflow: 'visible' }}>
         <Menu dropUp minWidth={130}
-          trigStyle={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', borderRight: `1px solid ${C.accentLine}`, color: C.accent, fontFamily: CODE, fontSize: 12, fontWeight: 700, padding: '0 12px', cursor: 'pointer' }}
+          trigStyle={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: 'transparent', border: 'none', borderRight: `1px solid ${C.line}`, color: C.accent, fontFamily: CODE, fontSize: 12, fontWeight: 700, padding: '0 12px', cursor: 'pointer' }}
           trigger={<span>{count}×</span>}
           items={COUNTS.map(n => ({ key: n, active: count === n, label: `${n} image${n > 1 ? 's' : ''}`, onSelect: () => set_count(n) }))} />
-        <button onClick={generate} disabled={busy} style={{ flex: 1, background: 'none', border: 'none', color: C.accent, fontFamily: DISPLAY, fontWeight: 700, fontSize: 13, letterSpacing: 0.5, textTransform: 'uppercase', cursor: busy ? 'default' : 'pointer', padding: '10px 0' }}>
+        <button onClick={generate} disabled={busy} style={{ flex: 1, background: busy ? 'transparent' : C.gen, border: 'none', color: busy ? C.gen : C.bg, fontFamily: DISPLAY, fontWeight: 700, fontSize: 13, letterSpacing: 0.5, textTransform: 'uppercase', cursor: busy ? 'default' : 'pointer', padding: '10px 0' }}>
           {busy ? 'forging…' : 'Generate ▸'}
         </button>
-        <button onClick={() => window.api.open_queue()} title="Open the generation queue" style={{ background: 'none', border: 'none', borderLeft: `1px solid ${C.accentLine}`, color: C.accent, fontFamily: DISPLAY, fontWeight: 700, fontSize: 11.5, letterSpacing: 0.5, textTransform: 'uppercase', cursor: 'pointer', padding: '0 14px' }}>Queue</button>
+        <button onClick={() => window.api.open_queue()} title="Open the generation queue" style={{ background: 'none', border: 'none', borderLeft: `1px solid ${C.line}`, color: C.accent, fontFamily: DISPLAY, fontWeight: 700, fontSize: 11.5, letterSpacing: 0.5, textTransform: 'uppercase', cursor: 'pointer', padding: '0 14px' }}>Queue</button>
       </div>
 
       {status && (
