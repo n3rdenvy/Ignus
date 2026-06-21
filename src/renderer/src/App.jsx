@@ -25,6 +25,7 @@ if (!window.api) {
     list_assets: async () => [], get_config: async () => ({ agents: [] }), save_config: async () => ({ ok: true }),
     comfy_presets: async () => [{ id: 'oneoff', label: 'One-off · SDXL', model: 'NoobAI-XL', loras: ['Wuthering Waves', 'Detail Tweaker XL'], promptStyle: 'danbooru tags', defaults: { steps: 28, cfg: 5, sampler: 'euler_ancestral', width: 832, height: 1216, batch: 1 } }],
     comfy_generate: async () => ({ ok: true, promptId: 'x', seed: 1 }),
+    comfy_queue: async () => ({ ok: true, running: [], pending: [], done: [] }), open_queue: noop, pick_image: async () => null,
     launch: async () => ({ ok: true }), stop_service: noop, open_url: noop, open_path: noop, open_cockpit: noop,
     asset_action: async () => ({ ok: true }), close: noop, send_tray_frames: noop, on_idle_reset: noop,
   }
@@ -86,7 +87,7 @@ export default function App() {
 
       {/* Flame — entire background, centered with breathing room (not stretched). */}
       <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: 'var(--flame-opacity)', pointerEvents: 'none', zIndex: 0, WebkitAppRegion: 'drag' }}>
-        <video autoPlay loop muted playsInline style={{ height: '88%', width: 'auto', maxWidth: '70%', objectFit: 'contain' }}>
+        <video autoPlay loop muted playsInline style={{ height: '101%', width: 'auto', maxWidth: '81%', objectFit: 'contain' }}>
           <source src="./flame_anim.webm" type="video/webm" /><source src="./flame_anim.mp4" type="video/mp4" />
         </video>
       </div>

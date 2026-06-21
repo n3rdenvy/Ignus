@@ -101,6 +101,9 @@ export default function GenerationPanel({ comfyRunning }) {
   const [count, set_count] = useState(1)
   const [style, set_style] = useState({ kw: '', summary: '' })
   const [wiz, set_wiz] = useState(false)
+  const [wizRect, set_wizRect] = useState(null)
+  const styleBtnRef = useRef(null)
+  function openWiz() { if (styleBtnRef.current) set_wizRect(styleBtnRef.current.getBoundingClientRect()); set_wiz(true) }
   const [ref, set_ref] = useState({ path: null, mode: null, strength: 0.8 })
   const [loraStr, set_loraStr] = useState({})
   const [status, set_status] = useState(null)
@@ -125,6 +128,7 @@ export default function GenerationPanel({ comfyRunning }) {
   async function generate() {
     if (!prompt.trim()) { set_status({ ok: false, reason: 'write a prompt first' }); return }
     set_busy(true); set_status(null)
+    window.api.open_queue()
     const refP = ref.path && ref.mode
       ? (ref.mode === 'img2img'
           ? { reference: ref.path, mode: 'img2img', denoise: Math.max(0.2, Math.min(0.85, +(1 - ref.strength).toFixed(2))) }
@@ -170,16 +174,18 @@ export default function GenerationPanel({ comfyRunning }) {
       <textarea value={negative} onChange={e => set_negative(e.target.value)} rows={2} style={{ ...ta, marginTop: 8, color: C.text2, fontSize: 11.5 }}
         placeholder="negative — what to avoid (blank uses the preset default)" />
 
-      {/* Style — multi-step funnel that appends curated style keywords to the prompt */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontFamily: CODE, fontSize: 10, color: C.dim }}>style</span>
-        {style.summary
-          ? <><span style={{ fontSize: 11, color: C.accent, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{style.summary}</span>
-              <span onClick={() => set_style({ kw: '', summary: '' })} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>clear</span></>
-          : <span style={{ fontSize: 11, color: C.text2, flex: 1 }}>none</span>}
-        <span onClick={() => set_wiz(w => !w)} style={{ fontSize: 11, fontWeight: 500, color: C.accent, cursor: 'pointer' }}>{wiz ? 'close' : 'choose ▸'}</span>
+      {/* Style Wizard — matches the Reference card below; popup opens by the button */}
+      <div style={{ ...glass, marginTop: 10, padding: '9px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${C.line}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontFamily: DISPLAY, fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: C.silver, textTransform: 'uppercase' }}>Style Wizard</span>
+          {style.summary
+            ? <><span style={{ fontFamily: CODE, fontSize: 11, color: C.accent, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{style.summary}</span>
+                <span onClick={() => set_style({ kw: '', summary: '' })} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>clear</span></>
+            : <span style={{ flex: 1 }} />}
+          <span ref={styleBtnRef} onClick={openWiz} style={{ marginLeft: style.summary ? 0 : 'auto', fontSize: 11, fontWeight: 500, color: C.accent, cursor: 'pointer' }}>choose image style</span>
+        </div>
       </div>
-      {wiz && <StyleWizard onApply={(kw, summary) => set_style({ kw, summary })} onClose={() => set_wiz(false)} />}
+      {wiz && <StyleWizard anchor={wizRect} onApply={(kw, summary) => set_style({ kw, summary })} onClose={() => set_wiz(false)} />}
 
       {/* Reference image + modes */}
       <div style={{ ...glass, marginTop: 10, padding: '9px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${C.line}` }}>

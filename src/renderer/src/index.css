@@ -46,6 +46,8 @@ html, body, #root {
 .ig-mi { cursor: pointer; transition: background 0.1s; }
 .ig-mi:hover { background: var(--accent-soft); }
 
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
 /* Frosted panel — translucent + blurred so the flame shows mildly beneath. */
 .glass {
   background: var(--panel-glass);

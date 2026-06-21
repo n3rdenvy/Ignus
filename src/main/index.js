@@ -24,6 +24,7 @@ const IGNUS_DIR   = join(HOME, '.ignus')
 const CONFIG_FILE = join(IGNUS_DIR, 'config.json')
 
 const DEFAULT_CONFIG = {
+  idleMinutes: 45,   // auto-stop backends after this many idle minutes (Toolbox setting)
   // Canonical, Syncthing-replicated asset library (see ignus-revamp brief).
   vaultRoot: join(HOME, 'IgnusVault'),
   // Headless Ignus-Agent worker machines the cockpit polls over the LAN.
@@ -157,7 +158,7 @@ function reset_idle_timer() {
     for (const name of Object.keys(SERVICES)) {
       if (await is_port_open(SERVICES[name].port)) stop_service(name)
     }
-  }, IDLE_MS)
+  }, (config.idleMinutes || 45) * 60 * 1000)
 }
 
 // ── CPU load ────────────────────────────────────────────────────────────────
@@ -473,28 +474,89 @@ function comfy_generate(preset, params = {}) {
   })
 }
 
-// ── Cockpit window (full control plane: machines + verify) ────────────────────
+// ── ComfyUI queue (for the Image Generation Queue window) ─────────────────────
+function comfy_get(path) {
+  return new Promise(resolve => {
+    const req = http.request(COMFY + path, { method: 'GET' }, res => {
+      let d = ''; res.on('data', c => { d += c }); res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve(null) } })
+    })
+    req.on('error', () => resolve(null)); req.setTimeout(3000, () => { req.destroy(); resolve(null) }); req.end()
+  })
+}
+async function comfy_queue() {
+  const [q, hist] = await Promise.all([comfy_get('/queue'), comfy_get('/history?max_items=12')])
+  if (!q && !hist) return { ok: false, running: [], pending: [], done: [] }
+  const textOf = wf => { try { return wf?.['20']?.inputs?.text || '' } catch { return '' } }
+  const running = (q?.queue_running || []).map(it => ({ id: it[1], prompt: textOf(it[2]), state: 'running' }))
+  const pending = (q?.queue_pending || []).map((it, i) => ({ id: it[1], prompt: textOf(it[2]), state: 'pending', pos: i + 1 }))
+  const done = []
+  if (hist) {
+    for (const id of Object.keys(hist).reverse().slice(0, 8)) {
+      const h = hist[id]
+      const imgs = []
+      for (const nid of Object.keys(h?.outputs || {})) for (const im of (h.outputs[nid].images || []))
+        imgs.push(`${COMFY}/view?filename=${encodeURIComponent(im.filename)}&subfolder=${encodeURIComponent(im.subfolder || '')}&type=${im.type || 'output'}`)
+      done.push({ id, prompt: textOf(Array.isArray(h?.prompt) ? h.prompt[2] : h?.prompt), state: 'done', images: imgs })
+    }
+  }
+  return { ok: true, running, pending, done }
+}
 
-let cockpit_win = null
+// ── Toolbox + Queue windows ───────────────────────────────────────────────────
+
+let cockpit_win = null   // the Toolbox
+let queue_win = null     // the Image Generation Queue
+const WIN_GAP = 8
+
+function load_view(win, view) {
+  const base = process.env.ELECTRON_RENDERER_URL || `file://${join(__dirname, '../renderer/index.html')}`
+  win.loadURL(base + (base.includes('?') ? '&' : '?') + 'view=' + view)
+}
+function dock_on() { if (process.platform === 'darwin') app.setActivationPolicy('regular') }
+function dock_off() { if (process.platform === 'darwin' && !cockpit_win && !queue_win) app.setActivationPolicy('accessory') }
+
+// Autofit: tile Toolbox (left of the menu, full height) + Queue (below the menu)
+// into one tidy cluster around the menu popup.
+function place_tiled(win, where) {
+  const p = (picker_win && !picker_win.isDestroyed()) ? picker_win.getBounds() : null
+  if (!p) return
+  const { workArea } = screen.getPrimaryDisplay()
+  const b = win.getBounds()
+  if (where === 'left') {
+    let x = p.x - b.width - WIN_GAP
+    if (x < workArea.x) x = Math.min(p.x + p.width + WIN_GAP, workArea.x + workArea.width - b.width)
+    win.setBounds({ x, y: p.y, width: b.width, height: p.height })
+  } else {
+    let y = p.y + p.height + WIN_GAP
+    if (y + b.height > workArea.y + workArea.height) y = Math.max(workArea.y, workArea.y + workArea.height - b.height)
+    win.setBounds({ x: p.x, y, width: b.width, height: b.height })
+  }
+}
 
 function create_cockpit() {
   if (cockpit_win && !cockpit_win.isDestroyed()) { cockpit_win.show(); cockpit_win.focus(); return }
   cockpit_win = new BrowserWindow({
-    width: 1040, height: 720, minWidth: 760, minHeight: 520,
-    title: 'Ignus Cockpit',
-    backgroundColor: '#020202',
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.js'),
-      contextIsolation: true, nodeIntegration: false,
-    },
+    width: 460, height: 760, minWidth: 380, minHeight: 480,
+    title: 'Ignus Toolbox', backgroundColor: '#020202',
+    webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false },
   })
-  const base = process.env.ELECTRON_RENDERER_URL || `file://${join(__dirname, '../renderer/index.html')}`
-  cockpit_win.loadURL(base + (base.includes('?') ? '&' : '?') + 'view=cockpit')
-  if (process.platform === 'darwin') app.setActivationPolicy('regular') // show in dock while cockpit is open
-  cockpit_win.on('closed', () => {
-    cockpit_win = null
-    if (process.platform === 'darwin') app.setActivationPolicy('accessory')
+  load_view(cockpit_win, 'cockpit')
+  dock_on()
+  cockpit_win.once('ready-to-show', () => place_tiled(cockpit_win, 'left'))
+  cockpit_win.on('closed', () => { cockpit_win = null; dock_off() })
+}
+
+function create_queue() {
+  if (queue_win && !queue_win.isDestroyed()) { queue_win.show(); queue_win.focus(); return }
+  queue_win = new BrowserWindow({
+    width: 440, height: 300, minWidth: 360, minHeight: 200,
+    title: 'Image Generation Queue', backgroundColor: '#020202',
+    webPreferences: { preload: join(__dirname, '../preload/index.js'), contextIsolation: true, nodeIntegration: false },
   })
+  load_view(queue_win, 'queue')
+  dock_on()
+  queue_win.once('ready-to-show', () => place_tiled(queue_win, 'below'))
+  queue_win.on('closed', () => { queue_win = null; dock_off() })
 }
 
 // ── Picker ───────────────────────────────────────────────────────────────────
@@ -596,6 +658,8 @@ ipcMain.handle('open_url', (_e, url) => shell.openExternal(url))
 
 // ── Cockpit IPC ───────────────────────────────────────────────────────────────
 ipcMain.handle('open_cockpit',     () => create_cockpit())
+ipcMain.handle('open_queue',       () => create_queue())
+ipcMain.handle('comfy_queue',      () => comfy_queue())
 ipcMain.handle('machines_status',  () => machines_status())
 ipcMain.handle('list_assets',      () => list_assets())
 ipcMain.handle('asset_action',     (_e, sku, action) => { reset_idle_timer(); return asset_action(sku, action) })

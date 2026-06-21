@@ -22,4 +22,6 @@ contextBridge.exposeInMainWorld('api', {
   comfy_presets:    ()             => ipcRenderer.invoke('comfy_presets'),
   comfy_generate:   (preset, params) => ipcRenderer.invoke('comfy_generate', preset, params),
   pick_image:       ()             => ipcRenderer.invoke('pick_image'),
+  comfy_queue:      ()             => ipcRenderer.invoke('comfy_queue'),
+  open_queue:       ()             => ipcRenderer.invoke('open_queue'),
 })

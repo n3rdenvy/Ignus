@@ -1,15 +1,15 @@
 import React, { useState } from 'react'
+import { createPortal } from 'react-dom'
 
 const C = {
   panel: 'var(--panel)', panelDim: 'var(--panel-dim)', line: 'var(--line)', lineStrong: 'var(--line-strong)',
   accent: 'var(--accent)', soft: 'var(--accent-soft)', accentLine: 'var(--accent-line)', silver: 'var(--silver)',
-  text: 'var(--text)', text2: 'var(--text-2)', dim: 'var(--text-dim)', faint: 'var(--text-faint)', good: 'var(--good)',
+  text: 'var(--text)', text2: 'var(--text-2)', dim: 'var(--text-dim)', faint: 'var(--text-faint)',
 }
 const DISPLAY = "'Satoshi', system-ui, sans-serif"
-const glass = { backdropFilter: 'blur(12px) saturate(1.3)', WebkitBackdropFilter: 'blur(12px) saturate(1.3)' }
+const glass = { backdropFilter: 'blur(14px) saturate(1.3)', WebkitBackdropFilter: 'blur(14px) saturate(1.3)' }
 
 // Style taxonomy distilled from the Perchance text-to-image style list.
-// Each leaf contributes keywords appended to the prompt (the "prompt wrapper" pattern).
 const MEDIA = [
   { id: 'photo', label: 'Photographic', subs: [
     { label: 'Casual Photo', kw: 'casual photo, candid, natural light' },
@@ -52,11 +52,11 @@ const MODS = [
   { label: 'Vibrant color', kw: 'vibrant saturated colors' },
   { label: 'Anthro / furry', kw: 'anthro, furry' },
 ]
-
 const chip = (on) => ({ ...glass, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: 11.5,
   background: on ? C.soft : C.panel, border: `1px solid ${on ? C.accentLine : C.line}`, color: on ? C.accent : C.text2 })
 
-export default function StyleWizard({ onApply, onClose }) {
+// Floating popup anchored near the "choose image style" button.
+export default function StyleWizard({ anchor, onApply, onClose }) {
   const [step, set_step] = useState(1)
   const [medium, set_medium] = useState(null)
   const [sub, set_sub] = useState(null)
@@ -70,52 +70,45 @@ export default function StyleWizard({ onApply, onClose }) {
   }
   const summary = [sub?.label, ...MODS.filter(m => mods[m.label]).map(m => m.label)].filter(Boolean).join(' · ')
 
-  return (
-    <div style={{ ...glass, marginTop: 8, padding: 10, borderRadius: 9, background: C.panelDim, border: `1px solid ${C.lineStrong}` }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
-        <span style={{ fontFamily: DISPLAY, fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: C.silver, textTransform: 'uppercase' }}>Style</span>
-        <span style={{ fontSize: 10, color: C.dim }}>{['Medium', 'Look', 'Modifiers'][step - 1]} · {step}/3</span>
-        <span onClick={onClose} style={{ marginLeft: 'auto', fontSize: 11, color: C.dim, cursor: 'pointer' }}>close</span>
-      </div>
+  const W = 290
+  const left = anchor ? Math.max(8, Math.min(anchor.right - W, window.innerWidth - W - 8)) : 8
+  const top = anchor ? Math.max(8, Math.min(anchor.bottom + 6, window.innerHeight - 330)) : 60
 
-      {step === 1 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {MEDIA.map(m => (
-            <span key={m.id} style={chip(medium?.id === m.id)} onClick={() => { set_medium(m); set_sub(null); set_step(2) }}>{m.label}</span>
-          ))}
+  return createPortal(
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+      <div style={{ position: 'fixed', left, top, width: W, zIndex: 9999, ...glass, background: 'rgba(7,10,16,0.97)', border: `1px solid ${C.lineStrong}`, borderRadius: 11, padding: 11, boxShadow: '0 12px 32px rgba(0,0,0,0.6)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <span style={{ fontFamily: DISPLAY, fontSize: 11, fontWeight: 700, letterSpacing: 1, color: C.silver, textTransform: 'uppercase' }}>Style Wizard</span>
+          <span style={{ fontSize: 10, color: C.dim }}>{['Medium', 'Look', 'Modifiers'][step - 1]} · {step}/3</span>
+          <span onClick={onClose} style={{ marginLeft: 'auto', fontSize: 11, color: C.dim, cursor: 'pointer' }}>✕</span>
         </div>
-      )}
 
-      {step === 2 && medium && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {medium.subs.map(s => (
-            <span key={s.label} style={chip(sub?.label === s.label)} onClick={() => { set_sub(s); set_step(3) }}>{s.label}</span>
-          ))}
-        </div>
-      )}
+        {step === 1 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {MEDIA.map(m => <span key={m.id} style={chip(medium?.id === m.id)} onClick={() => { set_medium(m); set_sub(null); set_step(2) }}>{m.label}</span>)}
+        </div>}
 
-      {step === 3 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        {step === 2 && medium && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {medium.subs.map(s => <span key={s.label} style={chip(sub?.label === s.label)} onClick={() => { set_sub(s); set_step(3) }}>{s.label}</span>)}
+        </div>}
+
+        {step === 3 && <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
           {MODS.map(m => {
             const on = !!mods[m.label]
             return (
               <div key={m.label} onClick={() => set_mods(s => ({ ...s, [m.label]: !on }))} style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer' }}>
-                <span style={{ width: 15, height: 15, borderRadius: 4, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: `1.5px solid ${on ? C.accent : C.line}`, background: on ? C.soft : 'transparent', color: C.accent, fontSize: 10 }}>{on ? '✓' : ''}</span>
+                <span style={{ width: 15, height: 15, borderRadius: 4, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${on ? C.accent : C.line}`, background: on ? C.soft : 'transparent', color: C.accent, fontSize: 10 }}>{on ? '✓' : ''}</span>
                 <span style={{ fontSize: 12, color: on ? C.text : C.text2 }}>{m.label}</span>
               </div>
             )
           })}
-        </div>
-      )}
+        </div>}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-        {step > 1 && <span onClick={() => set_step(step - 1)} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>← back</span>}
-        {summary && <span style={{ fontSize: 10.5, color: C.dim, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{summary}</span>}
-        <button onClick={() => { onApply(compose(), summary); onClose() }} disabled={!sub} style={{
-          marginLeft: summary ? 0 : 'auto', ...glass, background: sub ? C.soft : C.panel, border: `1px solid ${sub ? C.accentLine : C.line}`,
-          color: sub ? C.accent : C.faint, fontFamily: DISPLAY, fontWeight: 700, fontSize: 11.5, padding: '6px 14px', borderRadius: 8, cursor: sub ? 'pointer' : 'default', textTransform: 'uppercase', letterSpacing: 0.4 }}>Apply</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 11 }}>
+          {step > 1 && <span onClick={() => set_step(step - 1)} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>← back</span>}
+          {summary && <span style={{ fontSize: 10, color: C.dim, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{summary}</span>}
+          <button onClick={() => { onApply(compose(), summary); onClose() }} disabled={!sub} style={{ marginLeft: summary ? 0 : 'auto', ...glass, background: sub ? C.soft : C.panel, border: `1px solid ${sub ? C.accentLine : C.line}`, color: sub ? C.accent : C.faint, fontFamily: DISPLAY, fontWeight: 700, fontSize: 11.5, padding: '6px 14px', borderRadius: 8, cursor: sub ? 'pointer' : 'default', textTransform: 'uppercase', letterSpacing: 0.4 }}>Apply</button>
+        </div>
       </div>
-    </div>
-  )
+    </>, document.body)
 }
