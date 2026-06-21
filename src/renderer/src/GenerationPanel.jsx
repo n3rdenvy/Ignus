@@ -277,6 +277,7 @@ export default function GenerationPanel({ comfyRunning }) {
         <button onClick={generate} disabled={busy} style={{ flex: 1, background: 'none', border: 'none', color: C.accent, fontFamily: DISPLAY, fontWeight: 700, fontSize: 13, letterSpacing: 0.5, textTransform: 'uppercase', cursor: busy ? 'default' : 'pointer', padding: '10px 0' }}>
           {busy ? 'forging…' : 'Generate ▸'}
         </button>
+        <button onClick={() => window.api.open_queue()} title="Open the generation queue" style={{ background: 'none', border: 'none', borderLeft: `1px solid ${C.accentLine}`, color: C.accent, fontFamily: DISPLAY, fontWeight: 700, fontSize: 11.5, letterSpacing: 0.5, textTransform: 'uppercase', cursor: 'pointer', padding: '0 14px' }}>Queue</button>
       </div>
 
       {status && (
