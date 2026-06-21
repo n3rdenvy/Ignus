@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import StyleWizard from './StyleWizard'
 
 const C = {
   panel: 'var(--panel)', panelDim: 'var(--panel-dim)', line: 'var(--line)', lineStrong: 'var(--line-strong)',
@@ -98,6 +99,8 @@ export default function GenerationPanel({ comfyRunning }) {
   const [adv, set_adv] = useState(false)
   const [p, set_p] = useState({ steps: 28, cfg: 5, sampler: 'euler_ancestral', scheduler: 'normal', width: 832, height: 1216, seed: '', denoise: '' })
   const [count, set_count] = useState(1)
+  const [style, set_style] = useState({ kw: '', summary: '' })
+  const [wiz, set_wiz] = useState(false)
   const [ref, set_ref] = useState({ path: null, mode: null, strength: 0.8 })
   const [loraStr, set_loraStr] = useState({})
   const [status, set_status] = useState(null)
@@ -127,7 +130,8 @@ export default function GenerationPanel({ comfyRunning }) {
           ? { reference: ref.path, mode: 'img2img', denoise: Math.max(0.2, Math.min(0.85, +(1 - ref.strength).toFixed(2))) }
           : { reference: ref.path, mode: ref.mode, refStrength: ref.strength })
       : {}
-    const res = await window.api.comfy_generate(preset, { prompt, negative, ...p, batch: count, loras: loraStr, ...refP })
+    const fullPrompt = prompt + (style.kw ? ', ' + style.kw : '')
+    const res = await window.api.comfy_generate(preset, { prompt: fullPrompt, negative, ...p, batch: count, loras: loraStr, ...refP })
     set_busy(false); set_status(res)
   }
 
@@ -165,6 +169,17 @@ export default function GenerationPanel({ comfyRunning }) {
         placeholder={cur?.promptStyle === 'danbooru tags' ? '1girl, silver hair, armor, forest…' : 'a weathered ranger at dusk, cinematic…'} />
       <textarea value={negative} onChange={e => set_negative(e.target.value)} rows={2} style={{ ...ta, marginTop: 8, color: C.text2, fontSize: 11.5 }}
         placeholder="negative — what to avoid (blank uses the preset default)" />
+
+      {/* Style — multi-step funnel that appends curated style keywords to the prompt */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+        <span style={{ fontFamily: CODE, fontSize: 10, color: C.dim }}>style</span>
+        {style.summary
+          ? <><span style={{ fontSize: 11, color: C.accent, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{style.summary}</span>
+              <span onClick={() => set_style({ kw: '', summary: '' })} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>clear</span></>
+          : <span style={{ fontSize: 11, color: C.text2, flex: 1 }}>none</span>}
+        <span onClick={() => set_wiz(w => !w)} style={{ fontSize: 11, fontWeight: 500, color: C.accent, cursor: 'pointer' }}>{wiz ? 'close' : 'choose ▸'}</span>
+      </div>
+      {wiz && <StyleWizard onApply={(kw, summary) => set_style({ kw, summary })} onClose={() => set_wiz(false)} />}
 
       {/* Reference image + modes */}
       <div style={{ ...glass, marginTop: 10, padding: '9px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${C.line}` }}>

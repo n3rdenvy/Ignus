@@ -55,25 +55,24 @@ export default function App() {
     window.addEventListener('keydown', on_key); return () => window.removeEventListener('keydown', on_key)
   }, [])
 
-  // Signature: menu-bar flame frames (reactive to load in main).
+  // Signature: the real blazing flame (extracted from flame_anim's full-fire window,
+  // alpha-keyed) looped in the menu bar. Main cycles these, faster under load.
   useEffect(() => {
-    const frames = []
-    for (let i = 0; i < 8; i++) {
-      const cv = document.createElement('canvas'); cv.width = 44; cv.height = 44
-      const ctx = cv.getContext('2d'); const t = (i / 8) * Math.PI * 2
-      const sway = Math.sin(t) * 4.5, flicker = Math.sin(t * 1.7 + 0.8) * 2, cx = 22
-      const tip_x = cx + sway, tip_y = 7 + flicker, base_y = 40
-      const g = ctx.createRadialGradient(cx, base_y - 10, 1, cx, base_y - 12, 22)
-      g.addColorStop(0, 'rgba(255,243,180,0.98)'); g.addColorStop(0.28, 'rgba(249,115,22,0.94)')
-      g.addColorStop(0.62, 'rgba(220,38,38,0.88)'); g.addColorStop(1, 'rgba(120,10,10,0)')
-      ctx.beginPath(); ctx.moveTo(tip_x, tip_y)
-      ctx.bezierCurveTo(tip_x + 6, tip_y + 9, cx + 16 + sway * 0.4, base_y - 16, cx + 13, base_y)
-      ctx.bezierCurveTo(cx + 6, base_y + 2, cx - 6, base_y + 2, cx - 13, base_y)
-      ctx.bezierCurveTo(cx - 16 - sway * 0.4, base_y - 16, tip_x - 6, tip_y + 9, tip_x, tip_y)
-      ctx.fillStyle = g; ctx.fill()
-      frames.push(cv.toDataURL('image/png'))
-    }
-    window.api.send_tray_frames(frames)
+    let cancelled = false
+    ;(async () => {
+      const urls = []
+      for (let i = 1; ; i++) {
+        const idx = String(i).padStart(2, '0')
+        let res
+        try { res = await fetch(`./tray/flame_${idx}.png`) } catch { break }
+        if (!res.ok) break
+        const blob = await res.blob()
+        const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob) })
+        urls.push(url)
+      }
+      if (!cancelled && urls.length) window.api.send_tray_frames(urls)
+    })()
+    return () => { cancelled = true }
   }, [])
 
   async function fire(name) { set_busy(b => ({ ...b, [name]: true })); await window.api.launch([name]); setTimeout(() => { set_busy(b => ({ ...b, [name]: false })); refresh() }, 1500) }
