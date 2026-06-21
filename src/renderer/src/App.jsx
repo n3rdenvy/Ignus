@@ -1,269 +1,217 @@
-import React, { useState, useEffect, useRef } from 'react'
-import MESH from './assets/white_mesh.png'
+import React, { useState, useEffect } from 'react'
+import GenerationPanel from './GenerationPanel'
+import Library from './Library'
+
+// Palette comes entirely from CSS variables (see index.css) so light/dark + the
+// silver+blue recolor live in one place. Warm flame stays only in the background.
+const C = {
+  bg: 'var(--bg)', panel: 'var(--panel)', panelDim: 'var(--panel-dim)', glass: 'var(--panel-glass)',
+  line: 'var(--line)', lineStrong: 'var(--line-strong)',
+  accent: 'var(--accent)', bright: 'var(--accent-bright)', soft: 'var(--accent-soft)', accentLine: 'var(--accent-line)',
+  silver: 'var(--silver)', text: 'var(--text)', text2: 'var(--text-2)', dim: 'var(--text-dim)', faint: 'var(--text-faint)',
+  live: 'var(--live)', launch: 'var(--launch)', close: 'var(--close)',
+  good: 'var(--good)', bad: 'var(--bad)', cold: 'var(--cold)',
+}
+const DISPLAY = "'Satoshi', system-ui, sans-serif"
+// CODE = the telemetry/“terminal” font. Swap this one token when the CLI font is chosen.
+const CODE = "'Satoshi', system-ui, sans-serif"
+const glass = { background: C.panel, backdropFilter: 'blur(14px) saturate(1.3)', WebkitBackdropFilter: 'blur(14px) saturate(1.3)' }
 
 if (!window.api) {
   const noop = () => {}
   window.api = {
-    get_status: async () => ({ InvokeAI: false, ComfyUI: false }),
-    send_tray_frames: noop,
-    launch: async () => ({ ok: true }),
-    stop_service: async () => {},
-    open_url: noop,
-    close: noop,
+    machines_status: async () => ({ local: { ComfyUI: { running: false, url: 'http://localhost:8188' } },
+      agents: [{ id: 'pc-worker', label: 'PC Forge', host: '', port: 7785, enabled: false, online: false, health: null }] }),
+    list_assets: async () => [], get_config: async () => ({ agents: [] }), save_config: async () => ({ ok: true }),
+    comfy_presets: async () => [{ id: 'oneoff', label: 'One-off · SDXL', model: 'NoobAI-XL', loras: ['Wuthering Waves', 'Detail Tweaker XL'], promptStyle: 'danbooru tags', defaults: { steps: 28, cfg: 5, sampler: 'euler_ancestral', width: 832, height: 1216, batch: 1 } }],
+    comfy_generate: async () => ({ ok: true, promptId: 'x', seed: 1 }),
+    launch: async () => ({ ok: true }), stop_service: noop, open_url: noop, open_path: noop, open_cockpit: noop,
+    asset_action: async () => ({ ok: true }), close: noop, send_tray_frames: noop, on_idle_reset: noop,
   }
 }
 
-const SERVICES = [
-  { name: 'InvokeAI', label: 'InvokeAI', port: 9090, color: '#f97316', url: 'http://localhost:9090' },
-  { name: 'ComfyUI',  label: 'ComfyUI',  port: 8188, color: '#a78bfa', url: 'http://localhost:8188' },
-]
-
 const POLL_MS = 3000
-
-function wait(ms) { return new Promise(r => setTimeout(r, ms)) }
+const IDLE_MS = 45 * 60 * 1000
+const fmt_bank = e => `idle in ${Math.max(0, Math.floor((IDLE_MS - e) / 60000))}m`
 
 export default function App() {
-  const [status,    set_status]    = useState({})
-  const [selected,  set_selected]  = useState({})
-  const [loading,   set_loading]   = useState(true)
-  const [launching, set_launching] = useState(false)
-  const [launch_elapsed, set_elapsed] = useState(0)
-  const [error,     set_error]     = useState(null)
+  const [view, set_view] = useState('forge')
+  const [machines, set_machines] = useState(null)
+  const [review, set_review] = useState(0)
+  const [busy, set_busy] = useState({})
+  const [idle_at, set_idle_at] = useState(null)
+  const [now, set_now] = useState(Date.now())
 
-  const elapsed_ref = useRef(null)
+  useEffect(() => { const t = setInterval(() => set_now(Date.now()), 1000); return () => clearInterval(t) }, [])
 
-  function refresh_status() {
-    window.api.get_status().then(set_status)
+  function refresh() {
+    window.api.machines_status().then(set_machines)
+    window.api.list_assets().then(a => set_review(a.filter(x => x.state === '_inbox').length))
   }
-
-  // Keyboard shortcuts
+  useEffect(() => { refresh(); const t = setInterval(refresh, POLL_MS); return () => clearInterval(t) }, [])
+  useEffect(() => { window.api.on_idle_reset(ts => set_idle_at(ts)) }, [])
   useEffect(() => {
-    function on_key(e) {
-      if (e.key === 'Escape') window.api.close()
-      if ((e.key === 'Enter' || e.key === ' ') && !launching) launch()
-    }
-    window.addEventListener('keydown', on_key)
-    return () => window.removeEventListener('keydown', on_key)
-  }, [launching, selected])
+    function on_key(e) { if (e.key === 'Escape') window.api.close() }
+    window.addEventListener('keydown', on_key); return () => window.removeEventListener('keydown', on_key)
+  }, [])
 
-  // Tray icon frames
+  // Signature: menu-bar flame frames (reactive to load in main).
   useEffect(() => {
     const frames = []
     for (let i = 0; i < 8; i++) {
-      const canvas  = document.createElement('canvas')
-      canvas.width  = 44
-      canvas.height = 44
-      const ctx = canvas.getContext('2d')
-      const t       = (i / 8) * Math.PI * 2
-      const sway    = Math.sin(t) * 4.5
-      const flicker = Math.sin(t * 1.7 + 0.8) * 2
-      const cx     = 22
-      const tip_x  = cx + sway
-      const tip_y  = 7 + flicker
-      const base_y = 40
-      const grad = ctx.createRadialGradient(cx, base_y - 10, 1, cx, base_y - 12, 22)
-      grad.addColorStop(0,    'rgba(255,243,180,0.98)')
-      grad.addColorStop(0.28, 'rgba(249,115,22,0.94)')
-      grad.addColorStop(0.62, 'rgba(220,38,38,0.88)')
-      grad.addColorStop(1,    'rgba(120,10,10,0)')
-      ctx.beginPath()
-      ctx.moveTo(tip_x, tip_y)
+      const cv = document.createElement('canvas'); cv.width = 44; cv.height = 44
+      const ctx = cv.getContext('2d'); const t = (i / 8) * Math.PI * 2
+      const sway = Math.sin(t) * 4.5, flicker = Math.sin(t * 1.7 + 0.8) * 2, cx = 22
+      const tip_x = cx + sway, tip_y = 7 + flicker, base_y = 40
+      const g = ctx.createRadialGradient(cx, base_y - 10, 1, cx, base_y - 12, 22)
+      g.addColorStop(0, 'rgba(255,243,180,0.98)'); g.addColorStop(0.28, 'rgba(249,115,22,0.94)')
+      g.addColorStop(0.62, 'rgba(220,38,38,0.88)'); g.addColorStop(1, 'rgba(120,10,10,0)')
+      ctx.beginPath(); ctx.moveTo(tip_x, tip_y)
       ctx.bezierCurveTo(tip_x + 6, tip_y + 9, cx + 16 + sway * 0.4, base_y - 16, cx + 13, base_y)
-      ctx.bezierCurveTo(cx + 6,  base_y + 2, cx - 6,  base_y + 2, cx - 13, base_y)
+      ctx.bezierCurveTo(cx + 6, base_y + 2, cx - 6, base_y + 2, cx - 13, base_y)
       ctx.bezierCurveTo(cx - 16 - sway * 0.4, base_y - 16, tip_x - 6, tip_y + 9, tip_x, tip_y)
-      ctx.fillStyle = grad
-      ctx.fill()
-      const wisp_x = cx + Math.sin(t + 1.2) * 3.5
-      const wisp_y = base_y - 15 + Math.cos(t * 1.3) * 2.5
-      const wg = ctx.createRadialGradient(wisp_x, wisp_y, 0, wisp_x, wisp_y, 6)
-      wg.addColorStop(0, 'rgba(255,255,210,0.85)')
-      wg.addColorStop(1, 'rgba(249,115,22,0)')
-      ctx.beginPath()
-      ctx.arc(wisp_x, wisp_y, 6, 0, Math.PI * 2)
-      ctx.fillStyle = wg
-      ctx.fill()
-      frames.push(canvas.toDataURL('image/png'))
+      ctx.fillStyle = g; ctx.fill()
+      frames.push(cv.toDataURL('image/png'))
     }
     window.api.send_tray_frames(frames)
   }, [])
 
-  useEffect(() => {
-    window.api.get_status().then(s => {
-      set_status(s)
-      const pre = {}
-      for (const [name] of Object.entries(s)) pre[name] = false
-      set_selected(pre)
-      set_loading(false)
-    })
-    const poll = setInterval(refresh_status, POLL_MS)
-    return () => clearInterval(poll)
-  }, [])
+  async function fire(name) { set_busy(b => ({ ...b, [name]: true })); await window.api.launch([name]); setTimeout(() => { set_busy(b => ({ ...b, [name]: false })); refresh() }, 1500) }
+  async function quench(name) { set_busy(b => ({ ...b, [name]: true })); await window.api.stop_service(name); setTimeout(() => { set_busy(b => ({ ...b, [name]: false })); refresh() }, 1500) }
 
-  function toggle(name) {
-    set_selected(prev => ({ ...prev, [name]: !prev[name] }))
-  }
-
-  async function stop(name) {
-    await window.api.stop_service(name)
-    // Poll until the service is actually down (up to 8s)
-    let attempts = 0
-    const poll = setInterval(async () => {
-      await refresh_status()
-      attempts++
-      if (attempts >= 8) clearInterval(poll)
-    }, 1000)
-  }
-
-  function open_in_browser(url) {
-    window.api.open_url(url)
-  }
-
-  async function launch() {
-    const names = Object.entries(selected).filter(([, v]) => v).map(([k]) => k)
-    if (!names.length) { window.api.close(); return }
-    set_launching(true)
-    set_error(null)
-    set_elapsed(0)
-    elapsed_ref.current = setInterval(() => set_elapsed(s => s + 1), 1000)
-    const result = await window.api.launch(names)
-    clearInterval(elapsed_ref.current)
-    set_launching(false)
-    set_elapsed(0)
-    if (result && !result.ok) set_error(`Failed to start: ${result.failed.join(', ')}`)
-  }
-
-  const any_selected = Object.values(selected).some(Boolean)
-
-  function boot_label() {
-    if (launch_elapsed < 5)  return 'starting up…'
-    if (launch_elapsed < 15) return `booting… ${launch_elapsed}s`
-    if (launch_elapsed < 40) return `loading models… ${launch_elapsed}s`
-    return `almost there… ${launch_elapsed}s`
-  }
+  const comfy = machines?.local?.ComfyUI
+  const any_hot = !!comfy?.running
 
   return (
-    <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', borderRadius: 16, background: '#000' }}>
+    <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', borderRadius: 14, background: C.bg, color: C.text, fontFamily: DISPLAY, display: 'flex', flexDirection: 'column', position: 'relative' }}>
 
-      {/* Video background */}
-      <video
-        autoPlay loop muted playsInline
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
-      >
-        <source src="./flame_anim.webm" type="video/webm" />
-        <source src="./flame_anim.mp4"  type="video/mp4" />
-      </video>
-
-      {/* Dark overlay — keeps UI readable over the video */}
-      <div style={{
-        position: 'absolute', inset: 0,
-        background: 'linear-gradient(160deg, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.48) 55%, rgba(8,3,0,0.72) 100%)',
-      }} />
-
-      {/* Content */}
-      <div style={{
-        position: 'relative', zIndex: 2,
-        width: '100%', height: '100%',
-        display: 'flex', flexDirection: 'column',
-        padding: '18px 18px 16px', gap: 10,
-        WebkitAppRegion: 'drag',
-        backdropFilter: 'blur(28px) saturate(1.5)',
-        WebkitBackdropFilter: 'blur(28px) saturate(1.5)',
-        background: 'linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), inset 0 0 0 1px rgba(255,255,255,0.05)',
-      }}>
-
-        <button onClick={() => window.api.close()} style={{
-          position: 'absolute', top: 12, right: 14,
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: 'rgba(255,255,255,0.3)', fontSize: 20, lineHeight: 1,
-          padding: '0 2px', WebkitAppRegion: 'no-drag',
-        }}>×</button>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <img src={MESH} style={{ width: 20, height: 20, objectFit: 'contain', opacity: 0.9 }} alt="" />
-          <span style={{ color: '#fff', fontSize: 15, fontWeight: 700, letterSpacing: '-0.3px' }}>Ignus</span>
-          <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 11, marginTop: 1 }}>local AI, one click</span>
-        </div>
-
-        <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', flexShrink: 0 }} />
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, WebkitAppRegion: 'no-drag' }}>
-          {loading ? (
-            <div style={{ color: 'rgba(255,255,255,0.3)', fontSize: 13, textAlign: 'center', paddingTop: 24 }}>checking services…</div>
-          ) : SERVICES.map(svc => {
-            const running = status[svc.name]
-            const checked = selected[svc.name] ?? false
-            return (
-              <div key={svc.name} onClick={() => !running && toggle(svc.name)} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                padding: '10px 12px', borderRadius: 10,
-                background: checked ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.22)',
-                border: `1px solid ${checked ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)'}`,
-                cursor: running ? 'default' : 'pointer',
-                backdropFilter: 'blur(16px) saturate(1.3)',
-                WebkitBackdropFilter: 'blur(16px) saturate(1.3)',
-                boxShadow: checked ? 'inset 0 1px 0 rgba(255,255,255,0.1)' : 'none',
-                transition: 'background 0.15s, border-color 0.15s',
-              }}>
-                <div style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: running ? '#4ade80' : '#3f3f46', boxShadow: running ? '0 0 6px #4ade8099' : 'none' }} />
-                <span style={{ color: '#fff', fontSize: 13, fontWeight: 500, flex: 1 }}>{svc.label}</span>
-                <span style={{ color: 'rgba(255,255,255,0.22)', fontSize: 10, background: 'rgba(0,0,0,0.3)', padding: '2px 5px', borderRadius: 4 }}>:{svc.port}</span>
-                {running && (
-                  <>
-                    <button
-                      onClick={e => { e.stopPropagation(); open_in_browser(svc.url) }}
-                      style={{
-                        background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
-                        color: 'rgba(255,255,255,0.6)', fontSize: 9, padding: '2px 6px', borderRadius: 4,
-                        cursor: 'pointer', lineHeight: 1.4, flexShrink: 0,
-                      }}
-                    >open</button>
-                    <span style={{ color: '#4ade80', fontSize: 10, background: 'rgba(74,222,128,0.12)', padding: '2px 6px', borderRadius: 4 }}>running</span>
-                    <button
-                      onClick={e => { e.stopPropagation(); stop(svc.name) }}
-                      style={{
-                        background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
-                        color: '#f87171', fontSize: 9, padding: '2px 6px', borderRadius: 4,
-                        cursor: 'pointer', lineHeight: 1.4, flexShrink: 0,
-                      }}
-                    >stop</button>
-                  </>
-                )}
-                {!running && (
-                  <div style={{
-                    width: 17, height: 17, borderRadius: 5, flexShrink: 0,
-                    border: `1.5px solid ${checked ? svc.color : 'rgba(255,255,255,0.2)'}`,
-                    background: checked ? svc.color : 'rgba(0,0,0,0.3)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    transition: 'background 0.15s, border-color 0.15s',
-                  }}>
-                    {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><polyline points="1.5,5 4,7.5 8.5,2.5" stroke="#000" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {error && (
-          <div style={{ color: '#f87171', fontSize: 11, textAlign: 'center', padding: '4px 8px', background: 'rgba(239,68,68,0.1)', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)' }}>
-            {error}
-          </div>
-        )}
-
-        <button onClick={launch} disabled={launching} style={{
-          width: '100%', padding: '10px 0', borderRadius: 10, border: 'none', flexShrink: 0,
-          background: any_selected && !launching ? 'linear-gradient(135deg, #f97316, #dc2626)' : 'rgba(255,255,255,0.07)',
-          color: any_selected ? '#fff' : 'rgba(255,255,255,0.25)',
-          fontSize: 13, fontWeight: 600,
-          cursor: any_selected && !launching ? 'pointer' : 'default',
-          letterSpacing: '-0.2px', transition: 'background 0.15s, color 0.15s',
-          WebkitAppRegion: 'no-drag',
-        }}>
-          {launching ? boot_label() : any_selected ? 'Launch' : 'nothing selected'}
-        </button>
-
+      {/* Flame — entire background, centered with breathing room (not stretched). */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: 'var(--flame-opacity)', pointerEvents: 'none', zIndex: 0, WebkitAppRegion: 'drag' }}>
+        <video autoPlay loop muted playsInline style={{ height: '88%', width: 'auto', maxWidth: '70%', objectFit: 'contain' }}>
+          <source src="./flame_anim.webm" type="video/webm" /><source src="./flame_anim.mp4" type="video/mp4" />
+        </video>
       </div>
+
+      <div style={{ position: 'relative', zIndex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px 10px', WebkitAppRegion: 'drag' }}>
+          <img src="./ignus_dark.png" alt="Ignus" style={{ width: 44, height: 44, borderRadius: 11, objectFit: 'cover', flexShrink: 0, border: `1px solid ${C.line}` }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 22, fontWeight: 900, letterSpacing: 1.5 }}>IGNUS</div>
+            <div style={{ fontSize: 11, fontWeight: 500, color: C.text2 }}>AI Image generation forge &amp; library</div>
+          </div>
+          <button onClick={() => window.api.open_cockpit()} title="Cockpit" style={iconBtn(C)}>⊞</button>
+          <button onClick={() => window.api.close()} style={{ ...iconBtn(C), fontSize: 18 }}>×</button>
+        </div>
+
+        {/* Forge / Library toggle */}
+        <div style={{ display: 'flex', gap: 6, padding: '6px 16px 8px', WebkitAppRegion: 'no-drag' }}>
+          {[['forge', 'Forge'], ['library', 'Library']].map(([id, label]) => (
+            <button key={id} onClick={() => set_view(id)} style={{
+              ...glass, flex: 1, padding: '8px 0', borderRadius: 9, cursor: 'pointer',
+              background: view === id ? C.soft : C.panel,
+              border: `1px solid ${view === id ? C.accentLine : C.line}`,
+              color: view === id ? C.accent : C.dim, fontFamily: DISPLAY, fontWeight: 700, fontSize: 12, letterSpacing: 1.2, textTransform: 'uppercase',
+            }}>{label}{id === 'library' && review ? ` · ${review}` : ''}</button>
+          ))}
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto', padding: '4px 16px 12px', WebkitAppRegion: 'no-drag' }}>
+          {!machines ? (
+            <div style={{ color: C.dim, fontSize: 12, textAlign: 'center', paddingTop: 24 }}>reading the burners…</div>
+          ) : view === 'forge' ? (
+            <>
+              <SectionLabel C={C} dot={C.live} name="Mac Mini" note="cockpit · always on" />
+              <BurnerRow C={C} name="ComfyUI" port={8188} running={any_hot} busy={busy.ComfyUI}
+                onFire={() => fire('ComfyUI')} onQuench={() => quench('ComfyUI')} onOpen={() => window.api.open_url(comfy.url)} />
+              <div style={{ height: 10 }} />
+              {machines.agents.map(a => <ForgeRow key={a.id} C={C} agent={a} onSaved={refresh} />)}
+              <div style={{ height: 12 }} />
+              <GenerationPanel comfyRunning={any_hot} />
+              {review > 0 && (
+                <div onClick={() => set_view('library')} style={{ ...glass, marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 9, cursor: 'pointer', background: C.soft, border: `1px solid ${C.accentLine}` }}>
+                  <span style={{ color: C.accent }}>◆</span>
+                  <span style={{ fontSize: 13, flex: 1 }}><b style={{ color: C.accent }}>{review} model{review > 1 ? 's' : ''}</b> cooling — review</span>
+                  <span style={{ color: C.accent }}>→</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <Library C={C} />
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 16px 10px' }}>
+          <span style={{ fontFamily: CODE, fontSize: 10.5, color: C.faint }}>{view === 'forge' && any_hot && idle_at ? fmt_bank(now - idle_at) : ''}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function iconBtn(C) { return { background: 'none', border: 'none', color: C.dim, cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '2px 3px', WebkitAppRegion: 'no-drag' } }
+
+function SectionLabel({ C, dot, name, note }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '4px 0 8px' }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} />
+      <span style={{ fontFamily: DISPLAY, fontSize: 11.5, fontWeight: 700, letterSpacing: 1.4, color: C.silver, textTransform: 'uppercase' }}>{name}</span>
+      <span style={{ fontSize: 11, fontWeight: 500, color: C.dim }}>{note}</span>
+    </div>
+  )
+}
+
+function BurnerRow({ C, name, port, running, busy, onFire, onQuench, onOpen }) {
+  return (
+    <div style={{ ...glass, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', marginBottom: 6, borderRadius: 9, background: running ? C.panel : C.panelDim, border: `1px solid ${running ? C.lineStrong : C.line}` }}>
+      <span style={{ width: 8, height: 8, borderRadius: 3, background: running ? C.live : C.cold, boxShadow: running ? '0 0 8px var(--live)' : 'none' }} />
+      <span style={{ fontSize: 13, flex: 1, color: running ? C.text : C.text2 }}>{name}</span>
+      {running ? (
+        <>
+          <span onClick={onOpen} title="open" style={{ fontFamily: CODE, fontSize: 11, color: C.accent, cursor: 'pointer' }}>:{port}</span>
+          <span onClick={busy ? undefined : onQuench} style={{ fontSize: 11.5, fontWeight: 500, color: C.close, border: `1px solid ${C.close}`, borderRadius: 5, padding: '2px 9px', cursor: 'pointer', opacity: busy ? 0.5 : 1 }}>{busy ? '…' : 'close'}</span>
+        </>
+      ) : (
+        <span onClick={busy ? undefined : onFire} style={{ fontSize: 12, fontWeight: 600, color: C.launch, border: `1px solid ${C.launch}`, borderRadius: 5, padding: '2px 9px', cursor: 'pointer', opacity: busy ? 0.5 : 1 }}>{busy ? 'launching…' : 'launch'}</span>
+      )}
+    </div>
+  )
+}
+
+function ForgeRow({ C, agent, onSaved }) {
+  const [host, set_host] = useState(agent.host || '')
+  const [saving, set_saving] = useState(false)
+  const online = agent.online, h = agent.health
+  const state = !agent.host ? 'cold' : online ? 'live' : 'cold'
+  async function save() {
+    set_saving(true)
+    const cfg = await window.api.get_config()
+    const agents = (cfg.agents || []).map(x => x.id === agent.id ? { ...x, host: host.trim(), enabled: !!host.trim() } : x)
+    await window.api.save_config({ agents }); set_saving(false); onSaved()
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, margin: '4px 0 8px' }}>
+        <span style={{ width: 7, height: 7, borderRadius: '50%', background: state === 'live' ? C.live : C.cold }} />
+        <span style={{ fontFamily: DISPLAY, fontSize: 11.5, fontWeight: 700, letterSpacing: 1.4, color: C.silver, textTransform: 'uppercase' }}>{agent.label}</span>
+        <span style={{ fontSize: 11, fontWeight: 500, color: C.dim }}>SF3D worker</span>
+        <span style={{ marginLeft: 'auto', fontFamily: CODE, fontSize: 11, color: state === 'live' ? C.live : C.cold }}>{state}</span>
+      </div>
+      {online ? (
+        <div style={{ ...glass, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 9, background: C.panel, border: `1px solid ${C.lineStrong}` }}>
+          <span style={{ width: 8, height: 8, borderRadius: 3, background: C.live, boxShadow: '0 0 8px var(--live)' }} />
+          <span style={{ fontSize: 12, flex: 1, color: C.text2 }}>{h?.gpu?.name || 'GPU'}</span>
+          <span style={{ fontFamily: CODE, fontSize: 11, color: C.accent }}>{h?.load != null ? `${Math.round(h.load * 100)}%` : '—'}</span>
+        </div>
+      ) : !agent.host ? (
+        <div style={{ ...glass, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${C.line}` }}>
+          <span style={{ fontSize: 12, color: C.dim, flexShrink: 0 }}>offline —</span>
+          <input value={host} onChange={e => set_host(e.target.value)} placeholder="192.168.1.xx" style={{ flex: 1, minWidth: 0, background: 'transparent', border: `1px solid ${C.line}`, borderRadius: 5, color: C.text, fontFamily: CODE, fontSize: 11, padding: '3px 8px' }} />
+          <span onClick={saving || !host.trim() ? undefined : save} style={{ fontSize: 11, color: C.accent, cursor: 'pointer', opacity: saving || !host.trim() ? 0.4 : 1 }}>{saving ? '…' : 'save'}</span>
+        </div>
+      ) : (
+        <div style={{ ...glass, padding: '8px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${C.line}`, fontSize: 12, color: C.dim }}>offline — no response on {agent.host}:{agent.port}</div>
+      )}
     </div>
   )
 }

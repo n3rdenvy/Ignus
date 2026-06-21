@@ -5,6 +5,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:renderer": "vite src/renderer --port 5290 --strictPort",
     "build": "electron-vite build",
     "package": "electron-vite build && electron-builder"
   },
@@ -16,6 +17,7 @@
     "vite": "^5.4.11"
   },
   "dependencies": {
+    "@google/model-viewer": "^4.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -24,12 +26,26 @@
     "productName": "Ignus",
     "icon": "build/icon.icns",
     "asar": true,
-    "asarUnpack": ["out/renderer/**/*.mp4", "out/renderer/**/*.webm"],
-    "files": ["out/**/*", "node_modules/**/*", "!node_modules/.cache/**/*"],
-    "directories": { "output": "release" },
+    "asarUnpack": [
+      "out/renderer/**/*.mp4",
+      "out/renderer/**/*.webm"
+    ],
+    "files": [
+      "out/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
-      "target": { "target": "dmg", "arch": ["arm64"] },
+      "target": {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      },
       "identity": null,
       "extendInfo": {
         "LSUIElement": true

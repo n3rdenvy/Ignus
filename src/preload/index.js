@@ -7,4 +7,19 @@ contextBridge.exposeInMainWorld('api', {
   open_url:         (url)    => ipcRenderer.invoke('open_url', url),
   close:            ()       => ipcRenderer.send('close'),
   send_tray_frames: (frames) => ipcRenderer.send('tray-frames', frames),
+  on_idle_reset:    (cb)     => ipcRenderer.on('idle-reset', (_e, ts) => cb(ts)),
+
+  // Cockpit
+  open_cockpit:     ()             => ipcRenderer.invoke('open_cockpit'),
+  machines_status:  ()             => ipcRenderer.invoke('machines_status'),
+  list_assets:      ()             => ipcRenderer.invoke('list_assets'),
+  asset_action:     (sku, action)  => ipcRenderer.invoke('asset_action', sku, action),
+  open_path:        (p)            => ipcRenderer.invoke('open_path', p),
+  get_config:       ()             => ipcRenderer.invoke('get_config'),
+  save_config:      (partial)      => ipcRenderer.invoke('save_config', partial),
+
+  // ComfyUI generation
+  comfy_presets:    ()             => ipcRenderer.invoke('comfy_presets'),
+  comfy_generate:   (preset, params) => ipcRenderer.invoke('comfy_generate', preset, params),
+  pick_image:       ()             => ipcRenderer.invoke('pick_image'),
 })

@@ -4,5 +4,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main:     { plugins: [externalizeDepsPlugin()] },
   preload:  { plugins: [externalizeDepsPlugin()] },
-  renderer: { plugins: [react()] }
+  renderer: {
+    plugins: [react()],
+    server: { port: 5276, strictPort: true } // fail loudly instead of drifting
+  }
 })
