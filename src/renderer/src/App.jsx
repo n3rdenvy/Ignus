@@ -100,8 +100,8 @@ export default function App() {
             <div style={{ fontFamily: DISPLAY, fontSize: 22, fontWeight: 900, letterSpacing: 1.5 }}>IGNUS</div>
             <div style={{ fontSize: 11, fontWeight: 500, color: C.text2 }}>AI Image generation forge &amp; library</div>
           </div>
-          <button onClick={() => window.api.open_cockpit()} title="Cockpit" style={iconBtn(C)}>⊞</button>
-          <button onClick={() => window.api.close()} style={{ ...iconBtn(C), fontSize: 18 }}>×</button>
+          <button onClick={() => window.api.open_cockpit()} title="Toolbox · cockpit" style={iconBtn(C)}><ToolboxGlyph color={C.dim} /></button>
+          <button onClick={() => window.api.close()} title="Close" style={{ ...iconBtn(C), fontSize: 19 }}>×</button>
         </div>
 
         {/* Forge / Library toggle */}
@@ -149,7 +149,19 @@ export default function App() {
   )
 }
 
-function iconBtn(C) { return { background: 'none', border: 'none', color: C.dim, cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '2px 3px', WebkitAppRegion: 'no-drag' } }
+// Equal centered squares so the toolbox + close icons line up exactly in the top-right corner.
+function iconBtn(C) { return { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, padding: 0, background: 'none', border: 'none', color: C.dim, cursor: 'pointer', fontSize: 15, lineHeight: 1, borderRadius: 8, WebkitAppRegion: 'no-drag' } }
+
+function ToolboxGlyph({ color = 'currentColor', size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
+      <rect x="3" y="7" width="18" height="12" rx="1.8" />
+      <path d="M3 12h18" />
+      <rect x="10" y="10.4" width="4" height="3.2" rx="0.6" fill={color} stroke="none" />
+    </svg>
+  )
+}
 
 function SectionLabel({ C, dot, name, note }) {
   return (
