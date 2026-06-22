@@ -670,6 +670,36 @@ ipcMain.handle('pick_image', async () => {
   const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] })
   return r.canceled || !r.filePaths[0] ? null : r.filePaths[0]
 })
+// Multi-select for the reference panel / multi-view turnaround.
+ipcMain.handle('pick_images', async () => {
+  const r = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] })
+  return r.canceled ? [] : r.filePaths
+})
+// Small data-URL thumbnail for a local image (renderer can't read file:// directly).
+ipcMain.handle('read_thumb', (_e, p) => {
+  try {
+    const img = nativeImage.createFromPath(p)
+    if (img.isEmpty()) return null
+    const { width } = img.getSize()
+    return (width > 320 ? img.resize({ width: 320 }) : img).toDataURL()
+  } catch { return null }
+})
+// Copy a collected turnaround set into a dated folder + reveal it — ready to hand to an avatar creator.
+ipcMain.handle('export_views', (_e, views = []) => {
+  const filled = (views || []).filter(v => v && v.path)
+  if (!filled.length) return { ok: false, reason: 'no views to export' }
+  try {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')
+    const dir = join(app.getPath('pictures'), 'Ignus Avatar Refs', stamp)
+    mkdirSync(dir, { recursive: true })
+    filled.forEach((v, i) => {
+      const ext = extname(v.path) || '.png'
+      copyFileSync(v.path, join(dir, `${String(i + 1).padStart(2, '0')}_${v.slug || 'view'}${ext}`))
+    })
+    shell.openPath(dir)
+    return { ok: true, dir, count: filled.length }
+  } catch (e) { return { ok: false, reason: String(e?.message || e) } }
+})
 ipcMain.handle('get_config',       () => ({ vaultRoot: config.vaultRoot, agents: config.agents }))
 ipcMain.handle('save_config', (_e, partial) => {
   config = { ...config, ...partial }

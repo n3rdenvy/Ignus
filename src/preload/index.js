@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('api', {
   get_status:       ()       => ipcRenderer.invoke('get_status'),
@@ -22,6 +22,11 @@ contextBridge.exposeInMainWorld('api', {
   comfy_presets:    ()             => ipcRenderer.invoke('comfy_presets'),
   comfy_generate:   (preset, params) => ipcRenderer.invoke('comfy_generate', preset, params),
   pick_image:       ()             => ipcRenderer.invoke('pick_image'),
+  pick_images:      ()             => ipcRenderer.invoke('pick_images'),
+  read_thumb:       (p)            => ipcRenderer.invoke('read_thumb', p),
+  export_views:     (views)        => ipcRenderer.invoke('export_views', views),
+  // Resolve a dropped File → absolute path (Electron 33 removed File.path).
+  path_for_file:    (file)         => webUtils.getPathForFile(file),
   comfy_queue:      ()             => ipcRenderer.invoke('comfy_queue'),
   open_queue:       ()             => ipcRenderer.invoke('open_queue'),
 })

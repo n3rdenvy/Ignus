@@ -37,6 +37,18 @@ const PARAM_HELP = [
   ['cfg', 'prompt adherence — 4–7 typical (Flux likes ~1); higher = stricter, can over-saturate.'],
   ['denoise', 'how far from the start latent — 1.0 = fresh image; lower keeps more of a reference (img2img).'],
 ]
+// Hover info for the model / LoRA / prompt-style terms.
+const MODEL_INFO = {
+  'NoobAI-XL': 'SDXL checkpoint tuned for anime & illustration — strong character art; prompt with danbooru tags.',
+  'Flux-dev Q8': 'Flux.1-dev, Q8 GGUF quant — photoreal & natural-language gen; heavier on VRAM.',
+  'Wuthering Waves': 'Style LoRA — the Wuthering Waves / gacha-splash-art look.',
+  'Detail Tweaker': 'LoRA that dials fine detail up or down.',
+  'Flux Realism': 'LoRA pushing Flux toward photoreal skin & texture.',
+  'Skin Texture': 'LoRA for finer skin / texture detail.',
+  'danbooru tags': 'Comma-separated booru tags ("1girl, silver hair, armor") — not full sentences.',
+  'natural language': 'Plain descriptive sentences — how Flux prefers prompts.',
+}
+const infoStyle = { borderBottom: '1px dotted currentColor', cursor: 'help' }
 const SIZES = [
   { w: 832, h: 1216, ratio: '2:3', kind: 'shape' },
   { w: 1216, h: 832, ratio: '3:2', kind: 'shape' },
@@ -48,6 +60,24 @@ const SIZES = [
 const COUNTS = [1, 2, 3, 4, 6, 8]
 const ALL_MODES = [['face', 'Face'], ['pose', 'Pose'], ['img2img', 'Img2img']]
 const MODE_LABEL = { face: 'identity strength', pose: 'pose strength', img2img: 'how close to reference' }
+
+// Character turnaround slots — the set you'd hand an avatar creator (2D rig or photo→3D).
+const VIEWS = [
+  { id: 'front', slug: 'front',               label: 'Front' },
+  { id: 'tql',   slug: 'three-quarter-left',  label: '¾ Left' },
+  { id: 'tqr',   slug: 'three-quarter-right', label: '¾ Right' },
+  { id: 'profl', slug: 'profile-left',        label: 'Profile L' },
+  { id: 'profr', slug: 'profile-right',       label: 'Profile R' },
+  { id: 'back',  slug: 'back',                label: 'Back' },
+]
+const IMG_RE = /\.(png|jpe?g|webp)$/i
+const fileName = p => (p ? p.split(/[\\/]/).pop() : null)
+// A drop event → absolute image paths. Electron 33 removed File.path, so resolve via preload's webUtils.
+function dropPaths(e) {
+  return Array.from(e.dataTransfer?.files || [])
+    .map(f => { try { return window.api.path_for_file(f) } catch { return null } })
+    .filter(p => p && IMG_RE.test(p))
+}
 
 function ShapeGlyph({ w, h }) {
   const max = 15, rw = w >= h ? max : max * w / h, rh = h >= w ? max : max * h / w
@@ -124,8 +154,6 @@ export default function GenerationPanel({ comfyRunning }) {
     if (ref.mode && !pr.refModes.includes(ref.mode)) set_ref(r => ({ ...r, mode: null }))
   }
 
-  async function load_ref() { const path = await window.api.pick_image(); if (path) set_ref(r => ({ ...r, path })) }
-
   async function generate() {
     if (!prompt.trim()) { set_status({ ok: false, reason: 'write a prompt first' }); return }
     set_busy(true); set_status(null)
@@ -135,14 +163,12 @@ export default function GenerationPanel({ comfyRunning }) {
           ? { reference: ref.path, mode: 'img2img', denoise: Math.max(0.2, Math.min(0.85, +(1 - ref.strength).toFixed(2))) }
           : { reference: ref.path, mode: ref.mode, refStrength: ref.strength })
       : {}
-    const fullPrompt = prompt + (style.kw ? ', ' + style.kw : '')
-    const res = await window.api.comfy_generate(preset, { prompt: fullPrompt, negative, ...p, batch: count, loras: loraStr, ...refP })
+    const res = await window.api.comfy_generate(preset, { prompt, negative, ...p, batch: count, loras: loraStr, ...refP })
     set_busy(false); set_status(res)
   }
 
   const ta = { ...glass, width: '100%', resize: 'vertical', background: C.panelDim, border: `1px solid ${C.line}`, borderRadius: 8, color: C.text, fontSize: 12, padding: '8px 10px', fontFamily: DISPLAY, lineHeight: 1.4 }
   const numStyle = { width: 46, background: C.panelDim, border: `1px solid ${C.line}`, borderRadius: 6, color: C.text, fontFamily: CODE, fontSize: 11, padding: '4px 6px' }
-  const refFilename = ref.path ? ref.path.split(/[\\/]/).pop() : null
 
   const sizeItems = SIZES.map(s => ({
     key: `${s.w}x${s.h}`, active: p.width === s.w && p.height === s.h,
@@ -164,9 +190,9 @@ export default function GenerationPanel({ comfyRunning }) {
 
       {cur && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, fontFamily: CODE, fontSize: 10, color: C.dim, flexWrap: 'wrap' }}>
-          <span style={{ color: C.accent }}>{cur.model}</span>
-          {cur.loras.map(l => <span key={l.id}>+{l.name}</span>)}
-          <span style={{ marginLeft: 'auto' }}>{cur.promptStyle}</span>
+          <span title={MODEL_INFO[cur.model] || ''} style={{ color: C.accent, ...infoStyle }}>{cur.model}</span>
+          {cur.loras.map(l => <span key={l.id} title={MODEL_INFO[l.name] || ''} style={infoStyle}>+{l.name}</span>)}
+          <span title={MODEL_INFO[cur.promptStyle] || ''} style={{ marginLeft: 'auto', ...infoStyle }}>{cur.promptStyle}</span>
         </div>
       )}
 
@@ -186,39 +212,10 @@ export default function GenerationPanel({ comfyRunning }) {
           <span ref={styleBtnRef} onClick={openWiz} style={{ marginLeft: style.summary ? 0 : 'auto', fontSize: 11, fontWeight: 500, color: C.accent, cursor: 'pointer' }}>choose image style</span>
         </div>
       </div>
-      {wiz && <StyleWizard anchor={wizRect} onApply={(kw, summary) => set_style({ kw, summary })} onClose={() => set_wiz(false)} />}
+      {wiz && <StyleWizard anchor={wizRect} onApply={(kw, summary) => { set_prompt(pr => (pr.trim() ? pr.replace(/\s*$/, '') + ', ' : '') + kw); set_style({ kw: '', summary }) }} onClose={() => set_wiz(false)} />}
 
-      {/* Reference image + modes */}
-      <div style={{ ...glass, marginTop: 10, padding: '9px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${C.line}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: ref.path ? 8 : 0 }}>
-          <span style={{ fontFamily: DISPLAY, fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: C.silver, textTransform: 'uppercase' }}>Reference</span>
-          {refFilename
-            ? <><span style={{ fontFamily: CODE, fontSize: 11, color: C.accent, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{refFilename}</span>
-                <span onClick={() => set_ref(r => ({ ...r, path: null, mode: null }))} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>clear</span></>
-            : <span onClick={load_ref} style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 500, color: C.accent, cursor: 'pointer' }}>load image ↗</span>}
-        </div>
-        {ref.path && (
-          <>
-            <div style={{ display: 'flex', gap: 6 }}>
-              {ALL_MODES.map(([m, label]) => {
-                const ok = !!cur?.refModes.includes(m), on = ref.mode === m
-                return (
-                  <button key={m} disabled={!ok} title={ok ? '' : `needs ${cur?.model} models`} onClick={() => set_ref(r => ({ ...r, mode: on ? null : m }))}
-                    style={{ flex: 1, padding: '5px 2px', borderRadius: 7, fontSize: 11, cursor: ok ? 'pointer' : 'not-allowed',
-                      background: on ? C.soft : 'transparent', border: `1px solid ${on ? C.accentLine : C.line}`, color: !ok ? C.faint : on ? C.accent : C.text2, opacity: ok ? 1 : 0.5 }}>{label}</button>
-                )
-              })}
-            </div>
-            {ref.mode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                <span style={{ fontFamily: CODE, fontSize: 10, color: C.dim, width: 120 }}>{MODE_LABEL[ref.mode]}</span>
-                <input type="range" min="0.1" max="1" step="0.05" value={ref.strength} onChange={e => set_ref(r => ({ ...r, strength: +e.target.value }))} style={{ flex: 1, accentColor: '#5BB1FF' }} />
-                <span style={{ fontFamily: CODE, fontSize: 10, color: C.text2, width: 30, textAlign: 'right' }}>{Math.round(ref.strength * 100)}%</span>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {/* Reference image + modes (single) / multi-view turnaround collector */}
+      <ReferenceCard cur={cur} refState={ref} setRef={set_ref} />
 
       {/* Core: resolution + steps + cfg + advanced toggle */}
       <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -306,6 +303,175 @@ function SectionLabel({ dot, name, note }) {
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: dot }} />
       <span style={{ fontFamily: DISPLAY, fontSize: 11.5, fontWeight: 700, letterSpacing: 1.4, color: C.silver, textTransform: 'uppercase' }}>{name}</span>
       <span style={{ fontSize: 11, fontWeight: 500, color: C.dim }}>{note}</span>
+    </div>
+  )
+}
+
+// ── Reference: single image (drives generation) ⇄ multi-view turnaround collector ──
+function Slot({ view, data, over, onEnter, onLeave, onPick, onDropFiles, onClear }) {
+  const filled = !!data?.path
+  return (
+    <div
+      onClick={() => !filled && onPick()}
+      onDragOver={e => { e.preventDefault(); onEnter() }}
+      onDragLeave={onLeave}
+      onDrop={e => { e.preventDefault(); e.stopPropagation(); onLeave(); onDropFiles(dropPaths(e)) }}
+      title={filled ? data.path : `drop or click — ${view.label}`}
+      style={{
+        position: 'relative', aspectRatio: '1 / 1', borderRadius: 8, overflow: 'hidden', cursor: filled ? 'default' : 'pointer',
+        border: `1px ${filled ? 'solid' : 'dashed'} ${over ? C.accent : filled ? C.line : C.lineStrong}`,
+        background: data?.thumb ? `center/cover no-repeat url(${data.thumb})` : (over ? C.soft : C.panel),
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'center', transition: 'border-color .12s, background .12s',
+      }}
+    >
+      {!filled && (
+        <span style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, color: over ? C.accent : C.dim, fontFamily: CODE, fontSize: 10, fontWeight: 600, textAlign: 'center', padding: 2 }}>
+          <span style={{ fontSize: 15, lineHeight: 1 }}>＋</span>{view.label}
+        </span>
+      )}
+      {filled && (
+        <>
+          <span onClick={e => { e.stopPropagation(); onClear() }} title="remove"
+            style={{ position: 'absolute', top: 2, right: 5, fontSize: 13, lineHeight: 1, color: '#fff', textShadow: '0 1px 4px #000', cursor: 'pointer' }}>×</span>
+          <span style={{ width: '100%', padding: '3px 4px', fontFamily: CODE, fontSize: 9, fontWeight: 700, textAlign: 'center', color: '#fff', background: 'linear-gradient(transparent, rgba(0,0,0,0.8))' }}>{view.label}</span>
+        </>
+      )}
+    </div>
+  )
+}
+
+function ReferenceCard({ cur, refState: ref, setRef: set_ref }) {
+  const [multi, set_multi] = useState(false)
+  const [views, set_views] = useState({})       // id → { path, thumb }
+  const [over, set_over] = useState(null)        // 'single' | 'grid' | view.id | null
+  const [exp, set_exp] = useState(null)          // export result
+  const filledCount = VIEWS.filter(v => views[v.id]?.path).length
+  const refFilename = fileName(ref.path)
+
+  const thumbFor = p => window.api.read_thumb(p).catch(() => null)
+
+  async function setSingle(path) { const thumb = await thumbFor(path); set_ref(r => ({ ...r, path, thumb })) }
+  function clearSingle() { set_ref(r => ({ ...r, path: null, thumb: null, mode: null })) }
+
+  async function fillSlot(id, path) {
+    set_views(v => ({ ...v, [id]: { path, thumb: null } }))
+    const t = await thumbFor(path)
+    set_views(v => (v[id]?.path === path ? { ...v, [id]: { path, thumb: t } } : v))
+  }
+  function clearSlot(id) { set_views(v => { const n = { ...v }; delete n[id]; return n }) }
+  // Distribute a list of paths into the empty slots, in turnaround order.
+  async function fillEmpty(paths) {
+    const empties = VIEWS.map(v => v.id).filter(id => !views[id]?.path)
+    const assign = empties.slice(0, paths.length).map((id, i) => [id, paths[i]])
+    if (!assign.length) return
+    set_views(v => { const n = { ...v }; assign.forEach(([id, p]) => { n[id] = { path: p, thumb: null } }); return n })
+    for (const [id, p] of assign) { const t = await thumbFor(p); set_views(v => (v[id]?.path === p ? { ...v, [id]: { path: p, thumb: t } } : v)) }
+  }
+
+  async function pickSingle() {
+    const paths = await window.api.pick_images()
+    if (!paths?.length) return
+    if (paths.length === 1) setSingle(paths[0])
+    else { set_multi(true); fillEmpty(paths) }     // selecting several jumps you into the turnaround
+  }
+  async function pickInto(id) { const paths = await window.api.pick_images(); if (paths?.[0]) fillSlot(id, paths[0]) }
+  async function pickMany() { const paths = await window.api.pick_images(); if (paths?.length) fillEmpty(paths) }
+
+  function onDropSingle(paths) {
+    if (!paths.length) return
+    if (paths.length === 1 && !multi) setSingle(paths[0])
+    else { set_multi(true); fillEmpty(paths) }
+  }
+  async function doExport() {
+    const payload = VIEWS.filter(v => views[v.id]?.path).map(v => ({ slug: v.slug, path: views[v.id].path }))
+    set_exp(await window.api.export_views(payload))
+  }
+
+  const dz = over === (multi ? 'grid' : 'single')
+  return (
+    <div
+      onDragOver={multi ? undefined : e => { e.preventDefault(); set_over('single') }}
+      onDragLeave={multi ? undefined : () => set_over(o => (o === 'single' ? null : o))}
+      onDrop={multi ? undefined : e => { e.preventDefault(); set_over(null); onDropSingle(dropPaths(e)) }}
+      style={{ ...glass, marginTop: 10, padding: '9px 10px', borderRadius: 9, background: C.panelDim, border: `1px solid ${dz && !multi ? C.accentLine : C.line}`, transition: 'border-color .12s' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: (multi || ref.path) ? 8 : 0 }}>
+        <span style={{ fontFamily: DISPLAY, fontSize: 11, fontWeight: 700, letterSpacing: 0.6, color: C.silver, textTransform: 'uppercase' }}>Reference</span>
+        {!multi && refFilename && (
+          <>
+            <span style={{ fontFamily: CODE, fontSize: 11, color: C.accent, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{refFilename}</span>
+            <span onClick={clearSingle} style={{ fontSize: 11, color: C.dim, cursor: 'pointer' }}>clear</span>
+          </>
+        )}
+        {!multi && !refFilename && <span onClick={pickSingle} style={{ fontSize: 11, fontWeight: 500, color: C.accent, cursor: 'pointer' }}>load image ↗</span>}
+        <span onClick={() => set_multi(m => !m)} title={multi ? 'back to a single reference image' : 'collect a character turnaround (front / sides / back)'}
+          style={{ marginLeft: 'auto', fontFamily: CODE, fontSize: 10.5, fontWeight: 600, color: multi ? C.accent : C.dim, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          {multi ? '↤ single image' : 'launch multi-view ⊞'}
+        </span>
+      </div>
+
+      {/* Single mode: thumbnail + face/pose/img2img modes + strength (drives generation) */}
+      {!multi && ref.path && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            {ref.thumb && <img src={ref.thumb} alt="" style={{ width: 46, height: 46, objectFit: 'cover', borderRadius: 7, border: `1px solid ${C.line}`, flexShrink: 0 }} />}
+            <div style={{ display: 'flex', gap: 6, flex: 1 }}>
+              {ALL_MODES.map(([m, label]) => {
+                const ok = !!cur?.refModes.includes(m), on = ref.mode === m
+                return (
+                  <button key={m} disabled={!ok} title={ok ? '' : `needs ${cur?.model} models`} onClick={() => set_ref(r => ({ ...r, mode: on ? null : m }))}
+                    style={{ flex: 1, padding: '5px 2px', borderRadius: 7, fontSize: 11, cursor: ok ? 'pointer' : 'not-allowed',
+                      background: on ? C.soft : 'transparent', border: `1px solid ${on ? C.accentLine : C.line}`, color: !ok ? C.faint : on ? C.accent : C.text2, opacity: ok ? 1 : 0.5 }}>{label}</button>
+                )
+              })}
+            </div>
+          </div>
+          {ref.mode && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontFamily: CODE, fontSize: 10, color: C.dim, width: 120 }}>{MODE_LABEL[ref.mode]}</span>
+              <input type="range" min="0.1" max="1" step="0.05" value={ref.strength} onChange={e => set_ref(r => ({ ...r, strength: +e.target.value }))} style={{ flex: 1, accentColor: '#5BB1FF' }} />
+              <span style={{ fontFamily: CODE, fontSize: 10, color: C.text2, width: 30, textAlign: 'right' }}>{Math.round(ref.strength * 100)}%</span>
+            </div>
+          )}
+        </>
+      )}
+      {!multi && !ref.path && (
+        <p style={{ margin: '6px 0 0', fontFamily: CODE, fontSize: 10, color: C.faint, lineHeight: 1.4 }}>drop an image here, or load one — then pick face / pose / img2img.</p>
+      )}
+
+      {/* Multi-view: a turnaround you assemble and hand to an avatar creator */}
+      {multi && (
+        <div
+          onDragOver={e => { e.preventDefault(); set_over('grid') }}
+          onDragLeave={() => set_over(o => (o === 'grid' ? null : o))}
+          onDrop={e => { e.preventDefault(); set_over(null); fillEmpty(dropPaths(e)) }}
+          style={{ borderRadius: 8, outline: over === 'grid' ? `1px dashed ${C.accent}` : 'none', outlineOffset: 3 }}
+        >
+          <p style={{ margin: '0 0 8px', fontFamily: CODE, fontSize: 10, color: C.faint, lineHeight: 1.4 }}>
+            drop photos of yourself into the slots (or drop a batch to auto-fill) — front, sides &amp; back become the turnaround you give an avatar creator.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            {VIEWS.map(view => (
+              <Slot key={view.id} view={view} data={views[view.id]} over={over === view.id}
+                onEnter={() => set_over(view.id)} onLeave={() => set_over(o => (o === view.id ? null : o))}
+                onPick={() => pickInto(view.id)} onClear={() => clearSlot(view.id)}
+                onDropFiles={paths => { paths[0] && fillSlot(view.id, paths[0]) }} />
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9 }}>
+            <span style={{ fontFamily: CODE, fontSize: 10, color: C.dim }}>{filledCount}/{VIEWS.length} views</span>
+            <span onClick={pickMany} style={{ fontFamily: CODE, fontSize: 10.5, fontWeight: 600, color: C.accent, cursor: 'pointer' }}>+ add images</span>
+            {filledCount > 0 && <span onClick={() => set_views({})} style={{ fontFamily: CODE, fontSize: 10.5, color: C.dim, cursor: 'pointer' }}>clear all</span>}
+            <button onClick={doExport} disabled={!filledCount}
+              style={{ marginLeft: 'auto', background: filledCount ? C.soft : 'transparent', border: `1px solid ${filledCount ? C.accentLine : C.line}`, borderRadius: 7, color: filledCount ? C.accent : C.faint, fontFamily: DISPLAY, fontSize: 11, fontWeight: 600, padding: '5px 12px', cursor: filledCount ? 'pointer' : 'not-allowed' }}>export set ↗</button>
+          </div>
+          {exp && (
+            <p style={{ margin: '7px 0 0', fontSize: 10.5, color: exp.ok ? C.good : C.bad }}>
+              {exp.ok ? `exported ${exp.count} view${exp.count > 1 ? 's' : ''} → opened the folder` : exp.reason}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
